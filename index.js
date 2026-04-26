@@ -776,24 +776,33 @@ async function sendToAppApi(filePath) {
     // Loga o body completo para facilitar debug
     console.log('[API] Response body:', JSON.stringify(result));
 
-    if (response.ok && result.success && result.errors === 0) {
-      console.log(`[API] ✓ OK — maps: ${result.maps_upserted ?? '?'} | inserted: ${result.inserted_count} | errors: ${result.errors}`);
+    // Suporta tanto o formato do novo backend { success, data: { processedCount, conferenceMapsUpserted } }
+    // quanto o formato legado da Edge Function { success, inserted_count, maps_upserted, errors }
+    const isNewBackend   = result.data && typeof result.data === 'object';
+    const processedCount = isNewBackend ? result.data.processedCount         : result.total_processed;
+    const mapsUpserted   = isNewBackend ? result.data.conferenceMapsUpserted : result.maps_upserted;
+    const insertedCount  = isNewBackend ? result.data.processedCount         : result.inserted_count;
+    const errorsCount    = isNewBackend ? 0                                  : (result.errors ?? 0);
+    const ok             = response.ok && result.success;
+
+    if (ok) {
+      console.log(`[API] ✓ OK — maps: ${mapsUpserted ?? '?'} | inserted: ${insertedCount ?? '?'} | errors: ${errorsCount}`);
     } else {
-      console.error(`[API] ✗ Falhou — status ${response.status} | inserted: ${result.inserted_count ?? '?'} | errors: ${result.errors ?? '?'}`);
+      console.error(`[API] ✗ Falhou — status ${response.status} | inserted: ${insertedCount ?? '?'} | errors: ${errorsCount}`);
       if (result.error_details) {
         console.error('[API] Detalhes:', JSON.stringify(result.error_details));
       }
     }
 
     return {
-      ok:            response.ok && result.success && result.errors === 0,
+      ok,
       status:        response.status,
-      processed:     result.total_processed  ?? records.length,
-      maps_upserted: result.maps_upserted    ?? null,
-      inserted:      result.inserted_count   ?? null,
-      errors:        result.errors           ?? null,
-      message:       result.message          ?? null,
-      error_details: result.error_details    ?? null,
+      processed:     processedCount  ?? records.length,
+      maps_upserted: mapsUpserted    ?? null,
+      inserted:      insertedCount   ?? null,
+      errors:        errorsCount     ?? null,
+      message:       result.message  ?? null,
+      error_details: result.error_details ?? null,
     };
 
   } catch (e) {
