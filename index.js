@@ -1430,7 +1430,8 @@ app.post('/upload-last', async (_req, res) => {
 
   console.log('[API] Reenvio manual do último CSV:', files[0].name);
   const result = await sendToAppApi(files[0].fullPath);
-  return res.json({ ok: result?.ok ?? false, file: files[0].name, ...result });
+  const { ok, ...rest } = result ?? {};
+  return res.json({ ok: ok ?? false, file: files[0].name, ...rest });
 });
 
 app.get('/view-last-csv', (_req, res) => {
