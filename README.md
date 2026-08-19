@@ -16,18 +16,25 @@ wms-bot/
 
 ---
 
-## Deploy no EasyPanel (Oracle VPS)
+## Deploy no Coolify
 
-### 1. Criar novo App no EasyPanel
+### 1. Conectar o GitHub ao Coolify (primeira vez)
 
-- Acesse seu EasyPanel
-- Clique em **+ New Service → App**
-- Nome: `wms-bot`
-- Tipo: **Dockerfile** (aponte para este repositório ou faça upload dos arquivos)
+- No Coolify, acesse **Settings → Source → GitHub**
+- Clique em **Install GitHub App** e autorize a conta `cddmaceio` (repositorios `wms-bot`)
+- Alternativa: usar um **Personal Access Token** (classic, escopo `repo`)
+- Confirme que o source GitHub aparece conectado
 
-### 2. Variáveis de ambiente obrigatórias
+### 2. Criar novo App no Coolify
 
-No EasyPanel, vá em **Environment** e adicione:
+- Acesse seu Coolify
+- Clique em **+ New Resource → Application → GitHub**
+- Selecione o repositório `cddmaceio/wms-bot`, branch `main`
+- **Build Pack:** Dockerfile (auto-detectado pelo `Dockerfile` na raiz)
+
+### 3. Variáveis de ambiente obrigatórias
+
+No Coolify, vá em **Environment Variables** e adicione:
 
 ```env
 # Credenciais WMS
@@ -41,25 +48,35 @@ PORT=3001
 SESSION_FILE=/data/wms-profile/storageState.json
 DOWNLOAD_DIR=/data/downloads
 
-# Opcional: endpoint para envio do CSV após download
-# Pode ser um webhook do n8n, rota da sua API, etc.
-WEBHOOK_URL=https://seu-n8n.exemplo.com/webhook/wms-csv
+# Integração com Supabase Edge Function (opcional)
+# URL base do projeto Supabase (Settings → API)
+APP_API_URL=https://xxxxxxxxxxx.supabase.co
+# anon key (Settings → API → anon public)
+APP_API_TOKEN=suas_anon_key
+# Endpoint da Edge Function (opcional)
+APP_API_ENDPOINT=/functions/v1/processar-carga/bulk-upsert-with-maps
 ```
 
-### 3. Volumes no EasyPanel
+### 4. Persistent Storages (volumes)
 
-Adicione dois volumes em **Mounts**:
+Adicione dois volumes em **Storages → Persistent Storages**:
 
 | Volume name       | Mount path           | Descrição                       |
 |-------------------|----------------------|---------------------------------|
 | `wms-profile`     | `/data/wms-profile`  | Persiste a sessão autenticada   |
 | `wms-downloads`   | `/data/downloads`    | Armazena CSVs e screenshots     |
 
-### 4. Porta exposta
+### 5. Porta e domínio
 
-- Porta interna: `3001`
-- Crie um domínio no EasyPanel apontando para a porta `3001`
-- Ative **Basic Auth** no EasyPanel para proteger o painel
+- Porta interna: `3001` (o Coolify detecta automaticamente pelo `EXPOSE` do Dockerfile)
+- Crie um domínio em **Domains** apontando para a porta `3001` (SSL automático via Let's Encrypt)
+- Ative **Basic Auth** no proxy do Coolify para proteger o painel
+
+### 6. Deploy
+
+- Clique em **Deploy** — o Coolify faz build + deploy automaticamente
+- Na primeira vez, o build demora um pouco (instalação do Chromium do Playwright)
+- A partir de então, todo **push no `main`** dispara novo deploy automático
 
 ---
 
