@@ -1,3 +1,6 @@
+// Fuso horário de Brasília (UTC-3) — o container pode iniciar em UTC
+process.env.TZ = process.env.APP_TIMEZONE || 'America/Maceio';
+
 const express = require('express');
 const { chromium } = require('playwright');
 const path = require('path');
@@ -50,6 +53,12 @@ function formatBytes(bytes) {
   return `${(bytes / 1048576).toFixed(1)} MB`;
 }
 
+// Data de hoje no fuso configurado (Brasília), em formato ISO yyyy-mm-dd
+function todayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
 function formatDateBR(input) {
   if (!input) {
     const d = new Date();
@@ -64,7 +73,7 @@ function formatDateBR(input) {
 }
 
 function normalizeFileDate(input) {
-  if (!input) return new Date().toISOString().slice(0, 10);
+  if (!input) return todayISO();
   if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(input)) {
     const [d, m, y] = input.split('/');
@@ -1181,7 +1190,7 @@ function renderUI() {
     <div class="action-left">
       <h2>Executar Download</h2>
       <div class="date-row">
-        <input class="date-input" type="date" id="dateInput" value="${new Date().toISOString().slice(0,10)}"/>
+        <input class="date-input" type="date" id="dateInput" value="${todayISO()}"/>
         <button class="btn btn-primary" id="runBtn" onclick="run()">
           <span id="runIcon">▶</span> Executar
         </button>
