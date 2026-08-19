@@ -132,32 +132,59 @@ Aceita formatos: `yyyy-mm-dd` ou `dd/mm/yyyy`.
 
 ## Integração com n8n
 
-### Opção 1 — Trigger agendado + HTTP Request
+Workflow importável: [`n8n/wms-bot-workflow.json`](n8n/wms-bot-workflow.json).
+
+O workflow dispara o bot **todos os dias às 6h**, e o próprio bot baixa o CSV do WMS **e** envia para o Supabase (Edge Function `bulk-upsert-with-maps`) internamente. O n8n apenas checa o resultado e notifica no WhatsApp via Evolution API.
+
+### Fluxo
 
 ```
-Cron (todo dia 6h) → HTTP POST /run → processa resultado
+[1] Agendamento diário às 6h   (cron 0 6 * * *)
+        ↓
+[2] Config                      (Set — variáveis/placeholders)
+        ↓
+[3] Executar Bot (baixar e enviar CSV)  (POST {BOT_URL}/run, onError: continue, timeout 10 min)
+        ↓
+[4] Executou com sucesso?       (IF $json.success === true)
+   ├── sim → [5] Upload OK?      (IF $json.upload?.ok === true)
+   │            ├── sim → [6] Notificar Sucesso (✅ mapas · registros · erros)
+   │            └── não → [7] API não configurada?  (IF $json.upload == null)
+   │                         ├── sim → [8] Notificar Sem API (ℹ️ APP_API_URL não configurada)
+   │                         └── não → [9] Notificar Erro Upload (❌ upload.error/status)
+   └── não → [10] Notificar Erro Execução (❌ error do /run)
 ```
 
-No nó HTTP Request do n8n:
-- Method: `POST`
-- URL: `https://wms-bot.seu-dominio.com/run`
-- Body: `{ "date": "{{ $now.toFormat('yyyy-MM-dd') }}" }`
-- Se tiver Basic Auth: adicione as credenciais
-
-### Opção 2 — Webhook receptor (WEBHOOK_URL)
-
-Configure `WEBHOOK_URL=https://seu-n8n.com/webhook/wms-csv` e o bot enviará automaticamente após cada download:
+O body do `POST /run` envia a data **do dia anterior** (às 6h o relatório do dia anterior está completo):
 
 ```json
 {
-  "source": "wms-bot",
-  "fileName": "wms-separacao-2026-03-31.csv",
-  "content": "MAPAS,PALETE,CAIXA,...\n566577,...",
-  "sentAt": "2026-03-31T09:00:00.000Z"
+  "date": "{{ $now.minus({days: 1}).toFormat('yyyy-MM-dd') }}"
 }
 ```
 
-No n8n, use um nó **Webhook** para receber, depois **Code** para parsear o CSV com `csv-parse` ou a biblioteca padrão.
+### Nó `Config` (preencher após importar)
+
+| Variável | Exemplo | Observação |
+|---|---|---|
+| `BOT_URL` | `http://wms-bot:3001` | Se n8n e bot estiverem na mesma rede Coolify, use o nome do serviço/container; senão a URL pública `http://IP:3001` |
+| `EVOLUTION_BASE_URL` | `https://SEU-EVOLUTION.com.br` | URL da instância Evolution |
+| `EVOLUTION_APIKEY` | `SEU-APIKEY` | API Key da instância Evolution |
+| `EVOLUTION_NUMBER` | `5511999999999` | WhatsApp que recebe as notificações |
+
+### Importação
+
+1. No n8n: **Workflows → Import from File** → selecione `n8n/wms-bot-workflow.json`.
+2. Preencha o nó **Config** com os valores reais.
+3. Ative o workflow (o n8n roda o `POST /run` com a data de ontem).
+
+### Notificações WhatsApp (Evolution API)
+
+| Caso | Mensagem |
+|---|---|
+| ✅ Upload OK | `✅ WMS Bot — Detalhes da Separação importado.` + data, mapas, registros, erros, arquivo |
+| ❌ Erro no upload | `❌ WMS Bot — falha no upload para a API.` + erro/status |
+| ℹ️ Sem API | `ℹ️ WMS Bot — CSV baixado, mas APP_API_URL não configurada no bot.` |
+| ❌ Erro na execução | `❌ WMS Bot — falha na execução.` + erro do `/run` |
 
 ---
 

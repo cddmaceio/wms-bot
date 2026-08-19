@@ -1,0 +1,352 @@
+{
+  "name": "WMS Bot - Download, Upload Supabase e Notificações",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "11111111-1111-1111-1111-111111111111",
+      "name": "Agendamento diário às 6h",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa01",
+              "name": "BOT_URL",
+              "value": "http://wms-bot:3001",
+              "type": "string"
+            },
+            {
+              "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa02",
+              "name": "EVOLUTION_BASE_URL",
+              "value": "https://SEU-EVOLUTION.com.br",
+              "type": "string"
+            },
+            {
+              "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa03",
+              "name": "EVOLUTION_APIKEY",
+              "value": "SEU-APIKEY",
+              "type": "string"
+            },
+            {
+              "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaa04",
+              "name": "EVOLUTION_NUMBER",
+              "value": "5511999999999",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "22222222-2222-2222-2222-222222222222",
+      "name": "Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [0, 140]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.BOT_URL }}/run",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"date\": \"={{ $now.minus({days: 1}).toFormat('yyyy-MM-dd') }}\"\n}",
+        "options": {
+          "onError": "continueRegularOutput",
+          "timeout": 600000
+        }
+      },
+      "id": "33333333-3333-3333-3333-333333333333",
+      "name": "Executar Bot (baixar e enviar CSV)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [0, 280]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.success === true }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "44444444-4444-4444-4444-444444444444",
+      "name": "Executou com sucesso?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [0, 420]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.upload?.ok === true }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "name": "Upload OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [240, 560]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.upload == null }}",
+              "rightValue": "true",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+      "name": "API não configurada?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [240, 700]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.EVOLUTION_BASE_URL }}/message/sendText",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Config').item.json.EVOLUTION_APIKEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"number\": \"={{ $('Config').item.json.EVOLUTION_NUMBER }}\",\n  \"text\": \"={{ '✅ WMS Bot — Detalhes da Separação importado.\\nData: ' + $json.dateUsed + '\\nMapas: ' + ($json.upload.maps_upserted ?? '?') + '\\nRegistros: ' + ($json.upload.processed ?? '?') + '\\nErros: ' + ($json.upload.errors ?? 0) + '\\nArquivo: ' + $json.file }}\"\n}",
+        "options": {}
+      },
+      "id": "cccccccc-cccc-cccc-cccc-cccccccccccc",
+      "name": "Notificar Sucesso",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 980]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.EVOLUTION_BASE_URL }}/message/sendText",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Config').item.json.EVOLUTION_APIKEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"number\": \"={{ $('Config').item.json.EVOLUTION_NUMBER }}\",\n  \"text\": \"={{ '❌ WMS Bot — falha no upload para a API.\\n' + ($json.upload?.error || ('status ' + ($json.upload?.status ?? '?'))) }}\"\n}",
+        "options": {}
+      },
+      "id": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "name": "Notificar Erro Upload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 840]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.EVOLUTION_BASE_URL }}/message/sendText",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Config').item.json.EVOLUTION_APIKEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"number\": \"={{ $('Config').item.json.EVOLUTION_NUMBER }}\",\n  \"text\": \"={{ 'ℹ️ WMS Bot — CSV baixado, mas APP_API_URL não configurada no bot.\\nArquivo: ' + $json.file }}\"\n}",
+        "options": {}
+      },
+      "id": "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee",
+      "name": "Notificar Sem API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [640, 840]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Config').item.json.EVOLUTION_BASE_URL }}/message/sendText",
+        "sendHeaders": true,
+        "specifyHeaders": "keypair",
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "={{ $('Config').item.json.EVOLUTION_APIKEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"number\": \"={{ $('Config').item.json.EVOLUTION_NUMBER }}\",\n  \"text\": \"={{ '❌ WMS Bot — falha na execução.\\n' + ($json.error || 'erro desconhecido') }}\"\n}",
+        "options": {}
+      },
+      "id": "77777777-7777-7777-7777-777777777777",
+      "name": "Notificar Erro Execução",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-380, 700]
+    }
+  ],
+  "connections": {
+    "Agendamento diário às 6h": {
+      "main": [
+        [
+          {
+            "node": "Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Config": {
+      "main": [
+        [
+          {
+            "node": "Executar Bot (baixar e enviar CSV)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Executar Bot (baixar e enviar CSV)": {
+      "main": [
+        [
+          {
+            "node": "Executou com sucesso?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Executou com sucesso?": {
+      "main": [
+        [
+          {
+            "node": "Upload OK?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notificar Erro Execução",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload OK?": {
+      "main": [
+        [
+          {
+            "node": "Notificar Sucesso",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "API não configurada?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API não configurada?": {
+      "main": [
+        [
+          {
+            "node": "Notificar Sem API",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notificar Erro Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  }
+}
