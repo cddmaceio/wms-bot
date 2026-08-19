@@ -1,6 +1,6 @@
 # WMS Bot · Detalhes da Separação
 
-Bot Node.js + Playwright para download automático do relatório **Detalhes da Separação** do WMS Ambev (`wmst2.ambev.com.br`), com dashboard web e integração via webhook.
+Bot Node.js + Playwright para download automático do relatório **Detalhes da Separação** do WMS Ambev (`wmst2.ambev.com.br`), com dashboard web e integração com o backend de conferência de carga (`conferenciadecarga`).
 
 ---
 
@@ -48,13 +48,11 @@ PORT=3001
 SESSION_FILE=/data/wms-profile/storageState.json
 DOWNLOAD_DIR=/data/downloads
 
-# Integração com Supabase Edge Function (opcional)
-# URL base do projeto Supabase (Settings → API)
-APP_API_URL=https://xxxxxxxxxxx.supabase.co
-# anon key (Settings → API → anon public)
-APP_API_TOKEN=suas_anon_key
-# Endpoint da Edge Function (opcional)
-APP_API_ENDPOINT=/functions/v1/processar-carga/bulk-upsert-with-maps
+# Integração com o backend de conferência de carga (opcional)
+# URL base do backend (mesma VPS/Coolify: use o nome do serviço; senão URL pública)
+APP_API_URL=http://conferencia-backend:3001
+# Endpoint de upload do backend (o bot envia { records, file_name } via JSON)
+APP_API_ENDPOINT=/api/conference/upload
 ```
 
 ### 4. Persistent Storages (volumes)
@@ -92,7 +90,7 @@ Adicione dois volumes em **Storages → Persistent Storages**:
 6. Clica em **Consultar**
 7. Clica no botão de **Download/Exportar**
 8. Salva o CSV em `/data/downloads/wms-separacao-YYYY-MM-DD.csv`
-9. Se `WEBHOOK_URL` estiver configurado, envia o CSV (conteúdo + metadata) via `POST JSON`
+9. Se `APP_API_URL` estiver configurado, envia os registros (JSON `{ records, file_name }`) para o endpoint `/api/conference/upload` do backend
 10. Tira screenshot de sucesso
 
 ### Sessão salva
@@ -134,7 +132,7 @@ Aceita formatos: `yyyy-mm-dd` ou `dd/mm/yyyy`.
 
 Workflow importável: [`n8n/wms-bot-workflow.json`](n8n/wms-bot-workflow.json).
 
-O workflow dispara o bot **todos os dias às 6h**, e o próprio bot baixa o CSV do WMS **e** envia para o Supabase (Edge Function `bulk-upsert-with-maps`) internamente. O n8n apenas checa o resultado e notifica no WhatsApp via Evolution API.
+O workflow dispara o bot **todos os dias às 6h**, e o próprio bot baixa o CSV do WMS **e** envia para o backend de conferência de carga (`POST /api/conference/upload`) internamente. O n8n apenas checa o resultado e notifica no WhatsApp via Evolution API.
 
 ### Fluxo
 

@@ -14,14 +14,12 @@ const WMS_USER     = process.env.WMS_USER     || '';
 const WMS_PASS     = process.env.WMS_PASS     || '';
 const PORT         = process.env.PORT         || 3001;
 
-// ── Integração com Supabase Edge Function ───────────────────
-// URL base do Supabase (ex: https://xxxxxxxxxxx.supabase.co)
+// ── Integração com o backend de conferência de carga ────────
+// URL base do backend (ex: http://conferencia-backend:3001 ou https://api.exemplo.com)
 const APP_API_URL    = process.env.APP_API_URL    || '';
-// Supabase anon key (obrigatório — Settings → API → anon public)
-const APP_API_TOKEN  = process.env.APP_API_TOKEN  || '';
-// Edge Function: processar-carga/bulk-upsert-with-maps
-const APP_API_ENDPOINT = process.env.APP_API_ENDPOINT || '/functions/v1/processar-carga/bulk-upsert-with-maps';
-// Tamanho do lote para envio (a edge function já faz batch de 1000 internamente)
+// Endpoint de upload do backend (não usa mais Supabase Edge Function)
+const APP_API_ENDPOINT = process.env.APP_API_ENDPOINT || '/api/conference/upload';
+// Tamanho do lote para envio (o backend já faz batch de 500 internamente)
 const APP_API_BATCH  = parseInt(process.env.APP_API_BATCH || '2000');
 
 const URL_LOGIN          = `${WMS_URL}/multiple-realms`;
@@ -681,7 +679,7 @@ async function clickDownloadBtn(page, fileDate) {
   return null;
 }
 
-// ── Envio para webhook (opcional) ────────────────────────────
+// ── Envio para o backend de conferência (opcional) ──────────
 // Transforma o CSV do WMS (separador ; e nomes PT-BR) para o formato da API
 // Mapeamento colunas WMS (PT-BR) → campos da tabela base_ocp
 const COL_MAP = {
@@ -727,7 +725,7 @@ function parseCsvToRecords(filePath) {
   console.log(`[API] CSV parseado: ${raw_records.length} registros brutos`);
 
   // Deduplica pelo conflito: codigo_armazem + mapas + palete + codigo_item
-  // O Supabase rejeita o batch inteiro se houver duplicatas na mesma chamada
+  // O backend rejeita o batch inteiro se houver duplicatas na mesma chamada
   const seen = new Map();
   for (const r of raw_records) {
     const key = `${r.codigo_armazem}|${r.mapas}|${r.palete}|${r.codigo_item}`;
@@ -757,14 +755,11 @@ async function sendToAppApi(filePath) {
     const records = parseCsvToRecords(filePath);
     if (!records.length) throw new Error('Nenhum registro no CSV');
 
-    // bulk-upsert-with-maps espera { records, file_name }
-    // Supabase Edge Function requer apikey + Authorization Bearer
+    // O endpoint do backend espera { records, file_name }
     const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${APP_API_TOKEN}`,
-        'apikey': APP_API_TOKEN,
       },
       body: JSON.stringify({ records, file_name: fileName }),
     });
@@ -776,8 +771,8 @@ async function sendToAppApi(filePath) {
     // Loga o body completo para facilitar debug
     console.log('[API] Response body:', JSON.stringify(result));
 
-    // Suporta tanto o formato do novo backend { success, data: { processedCount, conferenceMapsUpserted } }
-    // quanto o formato legado da Edge Function { success, inserted_count, maps_upserted, errors }
+    // Suporta o formato do backend { success, data: { processedCount, conferenceMapsUpserted } }
+    // e mantém compatibilidade com o formato legado da Edge Function { success, inserted_count, maps_upserted, errors }
     const isNewBackend   = result.data && typeof result.data === 'object';
     const processedCount = isNewBackend ? result.data.processedCount         : result.total_processed;
     const mapsUpserted   = isNewBackend ? result.data.conferenceMapsUpserted : result.maps_upserted;
@@ -887,7 +882,7 @@ async function runFlow(requestedDate) {
     await context.close().catch(() => {});
     await browser.close().catch(() => {});
 
-    // Envio para webhook se configurado
+    // Envio para o backend se configurado
     const webhookResult = await sendToAppApi(result.filePath);
 
     return {
