@@ -49,8 +49,8 @@ SESSION_FILE=/data/wms-profile/storageState.json
 DOWNLOAD_DIR=/data/downloads
 
 # Integração com o backend de conferência de carga (opcional)
-# URL base do backend (mesma VPS/Coolify: use o nome do serviço; senão URL pública)
-APP_API_URL=http://conferencia-backend:3001
+# O backend é uma API pública — use a URL pública do serviço
+APP_API_URL=https://SEU-BACKEND.com
 # Endpoint de upload do backend (o bot envia { records, file_name } via JSON)
 APP_API_ENDPOINT=/api/conference/upload
 ```
