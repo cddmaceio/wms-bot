@@ -50,7 +50,7 @@ DOWNLOAD_DIR=/data/downloads
 
 # Integração com o backend de conferência de carga (opcional)
 # O backend é uma API pública — use a URL pública do serviço
-APP_API_URL=https://SEU-BACKEND.com
+APP_API_URL=https://api2.cddmaceio.site
 # Endpoint de upload do backend (o bot envia { records, file_name } via JSON)
 APP_API_ENDPOINT=/api/conference/upload
 ```
