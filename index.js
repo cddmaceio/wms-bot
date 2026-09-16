@@ -247,6 +247,7 @@ async function doLogin(page, user, pass) {
   await sleep(500);
 
   // Botão Entrar
+  const credentialsForm = passInput.locator('xpath=ancestor::form[1]');
   const submitCandidates = [
     page.getByRole('button', { name: /entrar|login|sign\s*in|acessar|continue/i }).first(),
     page.getByRole('link', { name: /entrar|login|sign\s*in|acessar|continue/i }).first(),
@@ -255,6 +256,9 @@ async function doLogin(page, user, pass) {
     page.locator('button:has-text("Sign in")').first(),
     page.locator('button[type="submit"]').first(),
     page.locator('input[type="submit"]').first(),
+    // Algumas versões do WMS renderizam o submit sem texto acessível.
+    credentialsForm.locator('button[type="submit"], input[type="submit"], [role="button"]').last(),
+    credentialsForm.locator('button, input[type="submit"], [role="button"]').last(),
   ];
   let clicked = false;
   for (const btn of submitCandidates) {
@@ -267,7 +271,12 @@ async function doLogin(page, user, pass) {
       }
     } catch (_) {}
   }
-  if (!clicked) throw new Error('LOGIN_SUBMIT_BUTTON_NOT_FOUND');
+  // Último fallback: o formulário HTML deve submeter ao pressionar Enter no campo de senha.
+  if (!clicked) {
+    console.warn('[LOGIN] Botão de envio não identificado; tentando Enter no campo de senha');
+    await passInput.press('Enter').catch(() => {});
+    clicked = true;
+  }
 
   // Aguarda o redirect ou o desaparecimento do formulário. Sem esta validação
   // o bot salvava uma sessão inválida e só falhava depois, em NAV_FAILED.
