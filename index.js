@@ -149,14 +149,17 @@ async function doLogin(page, user, pass) {
   await logPage(page, 'Login Page - Multiple Realms');
   await saveScreenshot(page, 'login-realms');
 
-  // ── Passo 1: clicar em "Login com Credenciais" (3ª opção) ──
+  // ── Passo 1: clicar em "Login with credentials" / "Login com Credenciais" ──
+  // O WMS pode responder em inglês mesmo quando o restante do bot está em português.
   const realmCandidates = [
+    page.getByRole('button', { name: /login\s+(with\s+)?credentials|login\s+com\s+credenciais/i }).first(),
+    page.getByRole('link', { name: /login\s+(with\s+)?credentials|login\s+com\s+credenciais/i }).first(),
     page.locator('button:has-text("Login com Credenciais")').first(),
     page.locator('a:has-text("Login com Credenciais")').first(),
+    page.locator('button:has-text("Login with credentials")').first(),
+    page.locator('a:has-text("Login with credentials")').first(),
     page.locator('button:has-text("Credenciais")').first(),
     page.locator('a:has-text("Credenciais")').first(),
-    // fallback: terceiro botão/link clicável da tela
-    page.locator('button').nth(2),
   ];
   let realmClicked = false;
   for (const btn of realmCandidates) {
@@ -164,7 +167,7 @@ async function doLogin(page, user, pass) {
       if (await btn.count() && await btn.isVisible({ timeout: 2000 })) {
         await btn.click();
         realmClicked = true;
-        console.log('[LOGIN] "Login com Credenciais" clicado');
+        console.log('[LOGIN] Opção de login por credenciais clicada');
         break;
       }
     } catch (_) {}
@@ -174,9 +177,9 @@ async function doLogin(page, user, pass) {
     throw new Error('LOGIN_REALM_BUTTON_NOT_FOUND | Botão "Login com Credenciais" não encontrado');
   }
 
-  // Aguarda formulário de credenciais aparecer
+  // Aguarda o formulário real, em vez de depender de um atraso fixo.
+  await page.locator('input[type="password"]').first().waitFor({ state: 'visible', timeout: 15000 });
   await page.waitForLoadState('networkidle').catch(() => {});
-  await sleep(2500);
   await logPage(page, 'Credentials Form');
   await saveScreenshot(page, 'login-credentials-form');
 
@@ -245,10 +248,13 @@ async function doLogin(page, user, pass) {
 
   // Botão Entrar
   const submitCandidates = [
+    page.getByRole('button', { name: /entrar|login|sign\s*in|acessar|continue/i }).first(),
+    page.getByRole('link', { name: /entrar|login|sign\s*in|acessar|continue/i }).first(),
     page.locator('button:has-text("Entrar")').first(),
+    page.locator('button:has-text("Login")').first(),
+    page.locator('button:has-text("Sign in")').first(),
     page.locator('button[type="submit"]').first(),
     page.locator('input[type="submit"]').first(),
-    page.locator('button').last(),
   ];
   let clicked = false;
   for (const btn of submitCandidates) {
@@ -263,18 +269,41 @@ async function doLogin(page, user, pass) {
   }
   if (!clicked) throw new Error('LOGIN_SUBMIT_BUTTON_NOT_FOUND');
 
-  // Aguarda navegação pós-login
+  // Aguarda o redirect ou o desaparecimento do formulário. Sem esta validação
+  // o bot salvava uma sessão inválida e só falhava depois, em NAV_FAILED.
   await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
-  await sleep(3000);
+  await page.waitForFunction(() => {
+    const password = document.querySelector('input[type="password"]');
+    const text = (document.body?.innerText || '').toLowerCase();
+    const realmScreen = text.includes('login with credentials') || text.includes('login com credenciais');
+    return (!password || !(password.offsetWidth || password.offsetHeight || password.getClientRects().length)) && !realmScreen;
+  }, { timeout: 30000 }).catch(() => {});
+  await sleep(1000);
 
   await logPage(page, 'After Login');
   await saveScreenshot(page, 'after-login');
+  if (await isLoginPage(page)) {
+    const shot = await saveScreenshot(page, 'login-failed');
+    throw new Error(`LOGIN_FAILED | O WMS permaneceu na tela de login | screenshot=${shot}`);
+  }
   return page.url();
 }
 
+async function isLoginPage(page) {
+  const url = page.url().toLowerCase();
+  if (url.includes('multiple-realms') || url.includes('/login')) return true;
+
+  const passwordVisible = await page.locator('input[type="password"]').first()
+    .isVisible({ timeout: 1000 }).catch(() => false);
+  if (passwordVisible) return true;
+
+  const realmTextVisible = await page.getByText(/login\s+(with\s+)?credentials|login\s+com\s+credenciais/i)
+    .first().isVisible({ timeout: 1000 }).catch(() => false);
+  return realmTextVisible;
+}
+
 async function isLoggedIn(page) {
-  const url = page.url();
-  if (url.includes('multiple-realms') || url.includes('/login')) return false;
+  if (await isLoginPage(page)) return false;
   // Verifica se há elemento característico da sessão autenticada
   const nav = await page.locator('nav, .sidebar, [class*="menu"], [class*="nav"]').count().catch(() => 0);
   return nav > 0;
