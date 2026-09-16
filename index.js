@@ -249,6 +249,8 @@ async function doLogin(page, user, pass) {
   // Botão Entrar
   const credentialsForm = passInput.locator('xpath=ancestor::form[1]');
   const submitCandidates = [
+    // Seletor confirmado na tela atual do WMS.
+    page.locator('#root > span > main > div.sc-iplGWa.dSbpxF > div.sc-hVclCJ.lioTXk > div:nth-child(2) > div.sc-iXVhFP.iaeXyS.btn.btn-primary > button.sc-fujBio.cHqVJM.primary').first(),
     page.getByRole('button', { name: /entrar|login|sign\s*in|acessar|continue/i }).first(),
     page.getByRole('link', { name: /entrar|login|sign\s*in|acessar|continue/i }).first(),
     page.locator('button:has-text("Entrar")').first(),
