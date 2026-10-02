@@ -118,13 +118,22 @@ Se a sessão expirar, o bot detecta e faz login automático novamente.
 
 ### POST /run — payload
 
+Por padrão, o próprio bot calcula a data atual no fuso `APP_TIMEZONE` (padrão: `America/Maceio`) e a preenche nos dois campos de período do WMS. Para execução automática:
+
+```json
+{ "dateMode": "today" }
+```
+
+Para consultar uma data específica manualmente:
+
 ```json
 {
-  "date": "2026-03-31"
+  "date": "2026-03-31",
+  "dateMode": "selected"
 }
 ```
-Se `date` não for enviado, usa a data de hoje.  
-Aceita formatos: `yyyy-mm-dd` ou `dd/mm/yyyy`.
+Uma chamada antiga contendo apenas `date` passa a consultar o dia atual. Clientes que precisam consultar datas históricas devem enviar também `dateMode: "selected"`. O painel já envia esse modo ao usar a data escolhida.
+Aceita formatos de data manual: `yyyy-mm-dd` ou `dd/mm/yyyy`.
 
 ---
 
@@ -152,12 +161,10 @@ O workflow dispara o bot **todos os dias às 6h**, e o próprio bot baixa o CSV 
    └── não → [10] Notificar Erro Execução (❌ error do /run)
 ```
 
-O body do `POST /run` envia a data **do dia anterior** (às 6h o relatório do dia anterior está completo):
+O body do `POST /run` solicita a data **do próprio dia**, calculada pelo bot. Às 6h, o bot preenche o período no WMS com a data atual, mesmo que um workflow antigo ainda envie a data de ontem:
 
 ```json
-{
-  "date": "{{ $now.minus({days: 1}).toFormat('yyyy-MM-dd') }}"
-}
+{ "dateMode": "today" }
 ```
 
 ### Nó `Config` (preencher após importar)
@@ -173,7 +180,9 @@ O body do `POST /run` envia a data **do dia anterior** (às 6h o relatório do d
 
 1. No n8n: **Workflows → Import from File** → selecione `n8n/wms-bot-workflow.json`.
 2. Preencha o nó **Config** com os valores reais.
-3. Ative o workflow (o n8n roda o `POST /run` com a data de ontem).
+3. Ative o workflow (o n8n roda o `POST /run` com a data do dia atual). O fuso do workflow deve ser `America/Maceio` para executar às 6h de Brasília.
+
+Faça deploy da versão atualizada do bot no Coolify para aplicar a correção do filtro. Se o workflow já estiver importado no n8n, você também pode atualizar o campo **JSON Body** do nó **Executar Bot (baixar e enviar CSV)** com o JSON acima e salvar/publicar. Atualizar os arquivos locais não altera o workflow salvo no n8n.
 
 ### Notificações WhatsApp (Evolution API)
 

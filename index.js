@@ -59,6 +59,20 @@ function todayISO() {
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
+// Execuções automáticas sempre consultam o dia atual no fuso do bot.
+// Uma data histórica só é usada quando o painel/cliente solicita explicitamente.
+function resolveRunDate(options = {}) {
+  if (options.dateMode === 'selected') {
+    if (!options.date) throw new Error('DATE_REQUIRED | Informe a data para a consulta manual');
+    return normalizeFileDate(options.date);
+  }
+  const today = todayISO();
+  if (options.date && options.date !== today) {
+    console.log(`[RUN] Data recebida: ${options.date} | Consulta automática usa o dia atual: ${today}`);
+  }
+  return today;
+}
+
 function formatDateBR(input) {
   if (!input) {
     const d = new Date();
@@ -856,7 +870,8 @@ async function sendToAppApi(filePath) {
 }
 
 // ── Fluxo principal ──────────────────────────────────────────
-async function runFlow(requestedDate) {
+async function runFlow(options = {}) {
+  const requestedDate = resolveRunDate(options);
   const dateBr   = formatDateBR(requestedDate);
   const fileDate = normalizeFileDate(requestedDate);
 
@@ -1333,7 +1348,7 @@ function renderUI() {
       const res  = await fetch('/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ date }),
+        body: JSON.stringify({ date, dateMode: 'selected' }),
       });
       const data = await res.json();
       if (data.success) {
@@ -1426,7 +1441,7 @@ app.get('/session-status', (_req, res) => {
 
 app.post('/run', async (req, res) => {
   try {
-    const result = await runFlow(req.body?.date || null);
+    const result = await runFlow(req.body || {});
     return res.json(result);
   } catch (error) {
     console.error('[RUN] Error:', error.message);
