@@ -4,7 +4,8 @@
   "description": "Bot para download automático de relatórios WMS Ambev",
   "main": "index.js",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "node --test download.test.js login.test.js"
   },
   "dependencies": {
     "express": "^4.18.2",

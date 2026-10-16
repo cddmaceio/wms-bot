@@ -5,6 +5,7 @@ const express = require('express');
 const { chromium } = require('playwright');
 const path = require('path');
 const fs = require('fs');
+const { firstVisible, waitForLogin } = require('./login');
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -231,11 +232,8 @@ async function doLogin(page, user, pass) {
 
   for (const sel of userSelectors) {
     try {
-      const el = page.locator(sel).first();
-      const count = await el.count();
-      if (!count) continue;
-      const visible = await el.isVisible({ timeout: 1500 }).catch(() => false);
-      if (visible) {
+      const el = await firstVisible([page.locator(sel)], { enabled: true });
+      if (el) {
         userInput = el;
         console.log(`[LOGIN] Campo usuário encontrado com seletor: ${sel}`);
         break;
@@ -254,21 +252,27 @@ async function doLogin(page, user, pass) {
   await sleep(500);
 
   // Senha
-  const passInput = page.locator('input[type="password"]').first();
+  const passInput = await firstVisible([page.locator('input[type="password"]')], { enabled: true });
+  if (!passInput) throw new Error('LOGIN_PASSWORD_FIELD_NOT_FOUND');
   await passInput.waitFor({ state: 'visible', timeout: 10000 });
   await passInput.click();
   await passInput.fill(pass);
-  await sleep(500);
+  await passInput.press('Tab');
+  if (await userInput.inputValue() !== user || await passInput.inputValue() !== pass) {
+    throw new Error('LOGIN_FIELDS_NOT_FILLED | O formulário não manteve os campos preenchidos');
+  }
+  console.log('[LOGIN] Campos preenchidos e confirmados; procurando envio do formulário');
 
   // Botão Entrar
   const credentialsForm = passInput.locator('xpath=ancestor::form[1]');
   const submitCandidates = [
+    credentialsForm.getByRole('button', { name: /^(entrar|login|log\s*in|sign\s*in|acessar|continue|continuar)$/i }),
+    credentialsForm.locator('button[type="submit"], input[type="submit"]'),
+    page.getByRole('button', { name: /^(entrar|login|log\s*in|sign\s*in|acessar|continue|continuar)$/i }),
     // Seletor confirmado na tela atual do WMS.
     page.locator('#root > span > main > div.sc-iplGWa.dSbpxF > div.sc-hVclCJ.lioTXk > div:nth-child(2) > div.sc-iXVhFP.iaeXyS.btn.btn-primary > button.sc-fujBio.cHqVJM.primary').first(),
-    page.getByRole('button', { name: /entrar|login|sign\s*in|acessar|continue/i }).first(),
-    page.getByRole('link', { name: /entrar|login|sign\s*in|acessar|continue/i }).first(),
+    page.getByRole('link', { name: /^(entrar|login|log\s*in|sign\s*in|acessar|continue|continuar)$/i }),
     page.locator('button:has-text("Entrar")').first(),
-    page.locator('button:has-text("Login")').first(),
     page.locator('button:has-text("Sign in")').first(),
     page.locator('button[type="submit"]').first(),
     page.locator('input[type="submit"]').first(),
@@ -279,31 +283,38 @@ async function doLogin(page, user, pass) {
   let clicked = false;
   for (const btn of submitCandidates) {
     try {
-      if (await btn.count() && await btn.isVisible({ timeout: 1500 })) {
-        await btn.click();
+      const target = await firstVisible([btn], { enabled: true });
+      if (target) {
+        await target.click({ timeout: 8000 });
         clicked = true;
         console.log('[LOGIN] Botão Entrar clicado');
         break;
       }
-    } catch (_) {}
+    } catch (error) {
+      console.log('[LOGIN] Candidato de envio falhou:', error.name);
+    }
   }
   // Último fallback: o formulário HTML deve submeter ao pressionar Enter no campo de senha.
   if (!clicked) {
     console.warn('[LOGIN] Botão de envio não identificado; tentando Enter no campo de senha');
-    await passInput.press('Enter').catch(() => {});
-    clicked = true;
+    await passInput.press('Enter', { timeout: 8000 });
   }
 
   // Aguarda o redirect ou o desaparecimento do formulário. Sem esta validação
   // o bot salvava uma sessão inválida e só falhava depois, em NAV_FAILED.
-  await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => {});
-  await page.waitForFunction(() => {
-    const password = document.querySelector('input[type="password"]');
-    const text = (document.body?.innerText || '').toLowerCase();
-    const realmScreen = text.includes('login with credentials') || text.includes('login com credenciais');
-    return (!password || !(password.offsetWidth || password.offsetHeight || password.getClientRects().length)) && !realmScreen;
-  }, { timeout: 30000 }).catch(() => {});
-  await sleep(1000);
+  let outcome;
+  try {
+    outcome = await waitForLogin(page);
+  } catch (error) {
+    if (error.name !== 'TimeoutError') throw error;
+    const shot = await saveScreenshot(page, 'login-failed');
+    throw new Error(`LOGIN_FAILED | O login não foi confirmado em 60s; confira a mensagem do formulário | screenshot=${shot}`);
+  }
+  if (outcome.status === 'error') {
+    const shot = await saveScreenshot(page, 'login-failed');
+    const message = outcome.message.split(pass).join('[senha]').split(user).join('[usuario]');
+    throw new Error(`LOGIN_REJECTED | ${message} | screenshot=${shot}`);
+  }
 
   await logPage(page, 'After Login');
   await saveScreenshot(page, 'after-login');
@@ -661,85 +672,12 @@ async function forceRemoveOverlays(page) {
 }
 
 async function clickDownloadBtn(page, fileDate) {
-  console.log('[DOWNLOAD] Procurando botão de download...');
-
-  // Remove overlays que possam bloquear cliques
-  await forceRemoveOverlays(page);
-  await sleep(500);
-
-  // Log de diagnóstico: quantos div.content-button existem na tela?
-  const totalBtns = await page.locator('div.content-button').count().catch(() => 0);
-  console.log(`[DOWNLOAD] div.content-button encontrados na página: ${totalBtns}`);
-
-  // Tenta cada content-button da última para a primeira (o de download costuma ser o último)
-  for (let i = totalBtns - 1; i >= 0; i--) {
-    try {
-      const btn = page.locator('div.content-button').nth(i);
-      if (!(await btn.isVisible().catch(() => false))) continue;
-
-      await btn.scrollIntoViewIfNeeded().catch(() => {});
-      // Remove overlays imediatamente antes de clicar
-      await forceRemoveOverlays(page);
-      await sleep(400);
-
-      console.log(`[DOWNLOAD] Tentando content-button[${i}]...`);
-      const downloadPromise = page.waitForEvent('download', { timeout: 25000 });
-
-      // Tenta clique normal, fallback para clique via JS
-      try {
-        await btn.click({ timeout: 6000 });
-      } catch {
-        console.log(`[DOWNLOAD] Clique normal falhou, tentando via JS...`);
-        await btn.evaluate(el => el.click());
-      }
-
-      const download = await downloadPromise;
-      const ext = path.extname(download.suggestedFilename()) || '.csv';
-      const fp  = path.join(DOWNLOAD_DIR, `wms-separacao-${fileDate}${ext}`);
-      await download.saveAs(fp);
-      console.log('[DOWNLOAD] Arquivo salvo:', fp);
-      return { filePath: fp, suggestedFilename: download.suggestedFilename() };
-    } catch (e) {
-      console.log(`[DOWNLOAD] content-button[${i}] falhou:`, e.message.slice(0, 100));
-    }
-  }
-
-  // Fallbacks adicionais
-  const fallbacks = [
-    page.locator('button[title*="xport" i]').first(),
-    page.locator('button[title*="CSV" i]').first(),
-    page.locator('[class*="content-button"]').first(),
-    page.locator('a[download]').first(),
-    page.locator('button .pi-download').locator('..').first(),
-  ];
-
-  for (const btn of fallbacks) {
-    try {
-      if (!(await btn.count())) continue;
-      if (!(await btn.isVisible().catch(() => false))) continue;
-
-      await forceRemoveOverlays(page);
-      await sleep(300);
-
-      const downloadPromise = page.waitForEvent('download', { timeout: 25000 });
-      try {
-        await btn.click({ timeout: 6000 });
-      } catch {
-        await btn.evaluate(el => el.click());
-      }
-
-      const download = await downloadPromise;
-      const ext = path.extname(download.suggestedFilename()) || '.csv';
-      const fp  = path.join(DOWNLOAD_DIR, `wms-separacao-${fileDate}${ext}`);
-      await download.saveAs(fp);
-      console.log('[DOWNLOAD] Arquivo salvo via fallback:', fp);
-      return { filePath: fp, suggestedFilename: download.suggestedFilename() };
-    } catch (e) {
-      console.log('[DOWNLOAD] Fallback falhou:', e.message.slice(0, 100));
-    }
-  }
-
-  return null;
+  const { clickDownload } = require('./download');
+  return clickDownload(page, fileDate, {
+    downloadDir: DOWNLOAD_DIR,
+    removeOverlays: forceRemoveOverlays,
+    timeout: process.env.DOWNLOAD_TIMEOUT_MS,
+  });
 }
 
 // ── Envio para o backend de conferência (opcional) ──────────
@@ -939,7 +877,7 @@ async function runFlow(options = {}) {
     const result = await clickDownloadBtn(page, fileDate);
     if (!result) {
       const shot = await saveScreenshot(page, 'download-failed');
-      throw new Error(`DOWNLOAD_FAILED | Botão de download não encontrado | screenshot=${shot}`);
+      throw new Error(`DOWNLOAD_FAILED | Nenhum download concluído; verifique os candidatos e erros no log | screenshot=${shot}`);
     }
 
     const successShot = await saveScreenshot(page, 'success');

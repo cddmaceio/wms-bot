@@ -197,12 +197,22 @@ Faça deploy da versão atualizada do bot no Coolify para aplicar a correção d
 
 ## Ajuste fino do seletor de download
 
-Se o botão de download do WMS não for encontrado automaticamente, inspecione o elemento no DevTools e ajuste os candidatos na função `clickDownloadBtn` em `index.js`.
+O bot prioriza controles com texto, título, rótulo ou ícone de download/exportação e usa os `content-button` sem identificação como última tentativa. Controles ocultos ou desabilitados são ignorados. O log mostra o rótulo de cada candidato e distingue falha no clique, ausência de download e erro ao salvar o arquivo.
 
-Exemplo de seletor customizado para adicionar:
+O prazo para iniciar o download é de **60 segundos por candidato**. Para relatórios demorados, configure no Coolify e faça novo deploy:
+
+```env
+DOWNLOAD_TIMEOUT_MS=120000
+```
+
+Esse prazo aguarda o início do download; o salvamento aguarda a transferência terminar. Se nenhum candidato iniciar um download, consulte os logs e a screenshot em `/view-debug-last` para conferir o estado da tela e o seletor.
+
+
+Se o botão de download do WMS não for encontrado automaticamente, inspecione o elemento no DevTools e ajuste os candidatos na função `clickDownload` em `download.js`.
+
+Exemplo de seletor customizado para incluir em `controls`:
 ```javascript
-page.locator('button[aria-label="Exportar CSV"]').first(),
-page.locator('.export-btn').first(),
+button[aria-label="Exportar CSV"], .export-btn
 ```
 
 ---
