@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>WMS · Central de operação</title>
+    <link rel="stylesheet" href="/assets/style.css" />
+    <script src="/assets/app.js" defer></script>
+  </head>
+  <body>
+    <aside class="rail">
+      <a class="brand" href="/"
+        >W<span>MS</span><small>CENTRAL DE OPERAÇÃO</small></a
+      >
+      <nav aria-label="Navegação principal">
+        <button data-tab="overview" class="active" aria-current="page">
+          01 <span>Visão geral</span>
+        </button>
+        <button data-tab="jobs">02 <span>Execuções</span></button>
+        <button data-tab="settings">03 <span>Configurações</span></button>
+        <button data-tab="schedule">04 <span>Agenda</span></button>
+        <button data-tab="whatsapp">05 <span>WhatsApp</span></button>
+      </nav>
+      <div class="rail-note">
+        <span class="signal"></span> WMS BOT <b>2.0</b>
+        <p>Da consulta à confirmação.<br />Uma operação, um histórico.</p>
+      </div>
+    </aside>
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">CONTROLE DA INTEGRAÇÃO</p>
+          <h1 id="page-title">Visão geral</h1>
+        </div>
+        <div class="header-actions">
+          <span id="updated">Acesso protegido</span
+          ><button id="refresh" class="secondary" disabled>Atualizar</button
+          ><button id="logout" class="quiet" hidden>Sair</button>
+        </div>
+      </header>
+      <div id="notice" role="status" aria-live="polite" hidden></div>
+      <section id="login" class="panel access">
+        <p class="eyebrow">ACESSO ADMINISTRATIVO</p>
+        <h2>Sua operação começa aqui.</h2>
+        <p>
+          Informe o token administrativo para acessar consultas, configurações e
+          notificações.
+        </p>
+        <form id="login-form">
+          <label for="token">Token de acesso</label>
+          <div class="inline">
+            <input
+              id="token"
+              type="password"
+              autocomplete="off"
+              required
+              minlength="32"
+            /><button>Entrar na central</button>
+          </div>
+        </form>
+        <p class="muted">
+          O token permanece apenas nesta página. Ao fechar ou atualizar, será
+          necessário entrar novamente.
+        </p>
+      </section>
+      <div id="workspace" hidden>
+        <section data-view="overview">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">ACOMPANHAMENTO</p>
+              <h2>O estado da operação, agora.</h2>
+            </div>
+            <button class="secondary" id="go-run">Nova consulta ↗</button>
+          </div>
+          <div class="metrics">
+            <article>
+              <span>Processamento</span><strong id="worker-state">—</strong
+              ><small id="worker-note">Aguardando diagnóstico</small>
+            </article>
+            <article>
+              <span>WhatsApp</span><strong id="wa-state">—</strong
+              ><small id="wa-note">—</small>
+            </article>
+            <article>
+              <span>Próxima consulta</span><strong id="next-run">—</strong
+              ><small id="timezone">—</small>
+            </article>
+          </div>
+          <div class="panel">
+            <div class="panel-heading">
+              <h2>Última execução</h2>
+              <span class="muted">DOWNLOAD → IMPORTAÇÃO → AVISO</span>
+            </div>
+            <div id="latest" class="empty">Nenhuma execução registrada.</div>
+          </div>
+          <div class="panel">
+            <h2>Agenda e indisponibilidades</h2>
+            <p class="muted">
+              Horários perdidos são registrados. Para recuperar uma consulta,
+              inicie uma execução pela data desejada.
+            </p>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Horário / fuso</th>
+                    <th>Situação</th>
+                  </tr>
+                </thead>
+                <tbody id="slots"></tbody>
+              </table>
+            </div>
+          </div>
+          <details class="panel">
+            <summary>Diagnóstico e auditoria</summary>
+            <p id="disk" class="muted"></p>
+            <pre id="diagnostic"></pre>
+            <div id="audits"></div>
+          </details>
+        </section>
+        <section data-view="jobs" hidden>
+          <div class="panel">
+            <p class="eyebrow">NOVA CONSULTA</p>
+            <h2>Busque os dados do WMS.</h2>
+            <form id="run-form" class="run-form">
+              <label
+                >Data da consulta<input id="run-date" type="date" /><small
+                  >Deixe em branco para consultar hoje no fuso
+                  configurado.</small
+                ></label
+              ><button>Iniciar consulta</button>
+            </form>
+            <p class="muted">
+              A execução entra na fila. Você pode sair desta tela e acompanhar
+              pelo histórico.
+            </p>
+          </div>
+          <div class="panel">
+            <div class="panel-heading">
+              <h2>Histórico de execuções</h2>
+              <span class="muted">100 MAIS RECENTES</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Data / execução</th>
+                    <th>Origem</th>
+                    <th>Etapa</th>
+                    <th>Registros</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="jobs-table"></tbody>
+              </table>
+            </div>
+          </div>
+          <section id="job-detail" class="panel" hidden>
+            <div class="panel-heading">
+              <h2>Detalhes da execução</h2>
+              <button id="close-detail" class="quiet">Fechar</button>
+            </div>
+            <div id="detail-content"></div>
+          </section>
+        </section>
+        <section data-view="settings" hidden>
+          <form id="settings-form" class="panel config-form">
+            <p class="eyebrow">CONEXÕES E DADOS</p>
+            <h2>Configure a integração.</h2>
+            <fieldset>
+              <legend>Acesso ao WMS</legend>
+              <div class="fields">
+                <label
+                  >URL do WMS<input
+                    data-setting="wmsUrl"
+                    type="url"
+                    required /></label
+                ><label
+                  >Usuário<input
+                    data-setting="wmsUser"
+                    autocomplete="off" /></label
+                ><label
+                  >Senha<input
+                    data-setting="wmsPass"
+                    type="password"
+                    autocomplete="new-password"
+                    placeholder="Deixe em branco para manter" /><small
+                    data-secret="wmsPass"
+                  ></small
+                ></label>
+              </div>
+            </fieldset>
+            <fieldset>
+              <legend>API de destino</legend>
+              <div class="fields">
+                <label
+                  >URL base<input
+                    data-setting="apiUrl"
+                    type="url"
+                    placeholder="https://api.exemplo.com" /></label
+                ><label
+                  >Endpoint<input data-setting="apiEndpoint" required /></label
+                ><label
+                  >Token Bearer, se exigido<input
+                    data-setting="apiToken"
+                    type="password"
+                    autocomplete="new-password"
+                    placeholder="Deixe em branco para manter" /><small
+                    data-secret="apiToken"
+                  ></small></label
+                ><label class="check"
+                  ><input id="clear-api-token" type="checkbox" />Remover token
+                  salvo</label
+                >
+              </div>
+            </fieldset>
+            <fieldset>
+              <legend>Operação</legend>
+              <div class="fields">
+                <label
+                  >Fuso horário<input
+                    data-setting="timezone"
+                    required
+                    placeholder="America/Maceio" /></label
+                ><label
+                  >Espera pelo início do download (ms)<input
+                    data-setting="downloadTimeoutMs"
+                    type="number"
+                    min="1000"
+                    max="600000"
+                    required /></label
+                ><label
+                  >Espera pela API (ms)<input
+                    data-setting="uploadTimeoutMs"
+                    type="number"
+                    min="1000"
+                    max="600000"
+                    required /></label
+                ><label
+                  >Retenção dos arquivos (dias)<input
+                    data-setting="retentionDays"
+                    type="number"
+                    min="1"
+                    max="3650"
+                    required
+                /></label>
+              </div>
+            </fieldset>
+            <div class="form-footer">
+              <p class="muted">
+                As alterações valem para novas execuções. Arquivos com
+                pendências são preservados.
+              </p>
+              <button>Salvar configurações</button>
+            </div>
+          </form>
+        </section>
+        <section data-view="schedule" hidden>
+          <form id="schedule-form" class="panel config-form">
+            <p class="eyebrow">AUTOMAÇÃO</p>
+            <h2>Defina quando consultar.</h2>
+            <label class="check"
+              ><input data-setting="scheduleEnabled" type="checkbox" />Ativar
+              agenda automática</label
+            >
+            <fieldset>
+              <legend>Dias da semana</legend>
+              <div class="weekdays" id="weekdays">
+                <label><input type="checkbox" value="0" />Dom</label
+                ><label><input type="checkbox" value="1" />Seg</label
+                ><label><input type="checkbox" value="2" />Ter</label
+                ><label><input type="checkbox" value="3" />Qua</label
+                ><label><input type="checkbox" value="4" />Qui</label
+                ><label><input type="checkbox" value="5" />Sex</label
+                ><label><input type="checkbox" value="6" />Sáb</label>
+              </div>
+            </fieldset>
+            <label
+              >Horários<input
+                id="schedule-times"
+                placeholder="06:00, 12:00, 18:00"
+                required
+              /><small
+                >Separe os horários por vírgula. Será utilizado o fuso das
+                configurações.</small
+              ></label
+            >
+            <p class="muted">
+              Somente um download será executado por vez. Consultas já
+              enfileiradas permanecem no histórico após reinício.
+            </p>
+            <div class="form-footer">
+              <p id="schedule-next" class="muted"></p>
+              <button>Salvar agenda</button>
+            </div>
+          </form>
+        </section>
+        <section data-view="whatsapp" hidden>
+          <div class="panel">
+            <div class="panel-heading">
+              <div>
+                <p class="eyebrow">PAREAMENTO</p>
+                <h2>Conecte o WhatsApp.</h2>
+              </div>
+              <button id="connect" class="secondary">
+                Conectar / atualizar QR
+              </button>
+            </div>
+            <p>
+              Habilite o WhatsApp abaixo. No telefone, abra
+              <strong>Aparelhos conectados → Conectar aparelho</strong> e
+              escaneie o QR.
+            </p>
+            <div id="qr-area" class="qr-area">
+              <img id="qr" alt="QR de pareamento do WhatsApp" hidden />
+              <p id="qr-state" class="muted">WhatsApp desativado.</p>
+            </div>
+          </div>
+          <form id="whatsapp-form" class="panel config-form">
+            <h2>Destinatários e notificações</h2>
+            <div class="inline toggles">
+              <label class="check"
+                ><input
+                  data-setting="whatsappEnabled"
+                  type="checkbox"
+                />Habilitar WhatsApp</label
+              ><label class="check"
+                ><input data-setting="sendEnabled" type="checkbox" />Permitir
+                envio de mensagens</label
+              >
+            </div>
+            <label
+              >Destinatários<textarea
+                id="recipients"
+                rows="4"
+                placeholder="5582999999999@c.us&#10;ID_DO_GRUPO@g.us"
+              ></textarea
+              ><small
+                >Um por linha. Para contatos, use DDI + DDD + número seguido de
+                @c.us. Para grupos, use o identificador exato @g.us.</small
+              ></label
+            >
+            <fieldset>
+              <legend>Notificar quando</legend>
+              <div id="events" class="events">
+                <label class="check"
+                  ><input type="checkbox" value="completed" />Importação
+                  concluída</label
+                ><label class="check"
+                  ><input type="checkbox" value="partial" />Importação com
+                  pendências</label
+                ><label class="check"
+                  ><input type="checkbox" value="failed" />Falha na
+                  execução</label
+                ><label class="check"
+                  ><input type="checkbox" value="uncertain" />Resultado
+                  incerto</label
+                ><label class="check"
+                  ><input type="checkbox" value="no_data" />Sem dados</label
+                ><label class="check"
+                  ><input type="checkbox" value="downloaded" />CSV baixado sem
+                  API</label
+                >
+              </div>
+            </fieldset>
+            <div class="form-footer">
+              <p class="muted">
+                Mensagens pendentes aguardam conexão. Resultados incertos exigem
+                conferência.
+              </p>
+              <button>Salvar notificações</button>
+            </div>
+          </form>
+          <div class="panel">
+            <h2>Enviar uma mensagem de teste</h2>
+            <form id="test-form" class="inline">
+              <label
+                >Destinatário<select
+                  id="test-recipient"
+                  required
+                ></select></label
+              ><button class="secondary">Enviar teste</button>
+            </form>
+          </div>
+          <div class="panel">
+            <h2>Histórico de mensagens</h2>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Destinatário</th>
+                    <th>Evento / execução</th>
+                    <th>Situação</th>
+                    <th>Conferência</th>
+                  </tr>
+                </thead>
+                <tbody id="deliveries"></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+      </div>
+      <footer>
+        WMS · CENTRAL DE OPERAÇÃO
+        <span>Consultas, importações e notificações em um só lugar.</span>
+      </footer>
+    </main>
+  </body>
+</html>

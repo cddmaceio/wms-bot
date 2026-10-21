@@ -1,228 +1,171 @@
-# WMS Bot · Detalhes da Separação
+# WMS Bot — Central de operação
 
-Bot Node.js + Playwright para download automático do relatório **Detalhes da Separação** do WMS Ambev (`wmst2.ambev.com.br`), com dashboard web e integração com o backend de conferência de carga (`conferenciadecarga`).
+Aplicação Node.js 24 + TypeScript para consultar **Detalhes da Separação** no WMS, validar o CSV, importar os dados na API de conferência e notificar pelo WhatsApp. Agenda, histórico, configurações e filas ficam no SQLite. Não precisa de n8n nem Evolution/EvoAPI.
 
----
+## Começar localmente
 
-## Estrutura do projeto
+Requer Node.js 24. No PowerShell:
 
-```
-wms-bot/
-├── index.js        ← servidor Express + lógica Playwright
-├── package.json
-├── Dockerfile
-└── README.md
+```powershell
+Copy-Item .env.example .env
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 ```
 
----
+Coloque o primeiro valor em `ADMIN_TOKEN` e o segundo em `SETTINGS_KEY`. São segredos diferentes. A chave deve ter exatamente 64 caracteres hexadecimais; guarde-a com o backup. Sem ela, configurações e snapshots existentes não podem ser recuperados.
 
-## Deploy no Coolify
-
-### 1. Conectar o GitHub ao Coolify (primeira vez)
-
-- No Coolify, acesse **Settings → Source → GitHub**
-- Clique em **Install GitHub App** e autorize a conta `cddmaceio` (repositorios `wms-bot`)
-- Alternativa: usar um **Personal Access Token** (classic, escopo `repo`)
-- Confirme que o source GitHub aparece conectado
-
-### 2. Criar novo App no Coolify
-
-- Acesse seu Coolify
-- Clique em **+ New Resource → Application → GitHub**
-- Selecione o repositório `cddmaceio/wms-bot`, branch `main`
-- **Build Pack:** Dockerfile (auto-detectado pelo `Dockerfile` na raiz)
-
-### 3. Variáveis de ambiente obrigatórias
-
-No Coolify, vá em **Environment Variables** e adicione:
-
-```env
-# Credenciais WMS
-WMS_USER=08749530496br1l         # seu usuário WMS
-WMS_PASS=sua_senha_aqui
-
-# Porta do serviço (diferente do bees-bot que usa 3000)
-PORT=3001
-
-# Caminhos internos (mapeados via volumes)
-SESSION_FILE=/data/wms-profile/storageState.json
-DOWNLOAD_DIR=/data/downloads
-
-# Integração com o backend de conferência de carga (opcional)
-# O backend é uma API pública — use a URL pública do serviço
-APP_API_URL=https://api2.cddmaceio.site
-# Endpoint de upload do backend (o bot envia { records, file_name } via JSON)
-APP_API_ENDPOINT=/api/conference/upload
+```powershell
+$env:PUPPETEER_SKIP_DOWNLOAD = 'true'
+$env:PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = '1'
+npm ci
+npx playwright install chromium
+npm run build
+npm start
 ```
 
-### 4. Persistent Storages (volumes)
+Abra **http://127.0.0.1:3001** e informe o `ADMIN_TOKEN`. Configure acesso WMS e API no painel. Agenda, WhatsApp e envio começam desativados. O token da página fica apenas em memória; atualizar a página exige nova autenticação.
 
-Adicione dois volumes em **Storages → Persistent Storages**:
+Os valores `WMS_*` e `APP_API_*` do ambiente inicializam a configuração na primeira abertura do banco. Depois disso, os valores salvos pelo painel têm prioridade, inclusive valores vazios. Alterar essas variáveis e reiniciar não substitui a configuração salva. Não apague o banco para alterar credenciais.
 
-| Volume name       | Mount path           | Descrição                       |
-|-------------------|----------------------|---------------------------------|
-| `wms-profile`     | `/data/wms-profile`  | Persiste a sessão autenticada   |
-| `wms-downloads`   | `/data/downloads`    | Armazena CSVs e screenshots     |
+## Docker Compose e Coolify
 
-### 5. Porta e domínio
+O contêiner contém a aplicação e o processo auxiliar WhatsApp. Só a porta HTTP da aplicação é exposta; a comunicação interna usa IPC. O Chromium é instalado pela mesma versão Playwright do lockfile e compartilhado pelos dois componentes. As sessões de navegador são separadas.
 
-- Porta interna: `3001` (o Coolify detecta automaticamente pelo `EXPOSE` do Dockerfile)
-- Crie um domínio em **Domains** apontando para a porta `3001` (SSL automático via Let's Encrypt)
-- Ative **Basic Auth** no proxy do Coolify para proteger o painel
+Para teste local, depois de configurar `.env`:
 
-### 6. Deploy
-
-- Clique em **Deploy** — o Coolify faz build + deploy automaticamente
-- Na primeira vez, o build demora um pouco (instalação do Chromium do Playwright)
-- A partir de então, todo **push no `main`** dispara novo deploy automático
-
----
-
-## Como funciona
-
-### Fluxo de execução (`POST /run`)
-
-1. Carrega a sessão salva (`storageState.json`) se existir
-2. Navega para `wmst2.ambev.com.br/wmsnew/#/separation/separation-details`
-3. Verifica se está logado — se não estiver, faz login com `WMS_USER` + `WMS_PASS`
-4. Salva automaticamente a sessão após login bem-sucedido
-5. Preenche o filtro de data (período = hoje ou data informada)
-6. Clica em **Consultar**
-7. Clica no botão de **Download/Exportar**
-8. Salva o CSV em `/data/downloads/wms-separacao-YYYY-MM-DD.csv`
-9. Se `APP_API_URL` estiver configurado, envia os registros (JSON `{ records, file_name }`) para o endpoint `/api/conference/upload` do backend
-10. Tira screenshot de sucesso
-
-### Sessão salva
-
-Após o primeiro login bem-sucedido, a sessão é salva em `storageState.json`.  
-Nas execuções seguintes, o bot reutiliza os cookies sem precisar logar novamente.  
-Se a sessão expirar, o bot detecta e faz login automático novamente.
-
----
-
-## Endpoints da API
-
-| Método | Rota                | Descrição                                  |
-|--------|---------------------|--------------------------------------------|
-| GET    | `/`                 | Dashboard web                              |
-| GET    | `/health`           | Status do serviço (JSON)                   |
-| GET    | `/session-status`   | Se há sessão salva                         |
-| POST   | `/run`              | Executa o fluxo de download                |
-| GET    | `/files`            | Lista CSVs disponíveis (JSON)              |
-| GET    | `/download-last`    | Baixa o CSV mais recente                   |
-| GET    | `/view-last-csv`    | Visualiza o CSV mais recente (texto)       |
-| GET    | `/view-debug-last`  | Visualiza última screenshot                |
-| GET    | `/download-debug-last` | Baixa última screenshot               |
-| POST   | `/delete-files`     | Apaga todos os CSVs e screenshots          |
-
-### POST /run — payload
-
-Por padrão, o próprio bot calcula a data atual no fuso `APP_TIMEZONE` (padrão: `America/Maceio`) e a preenche nos dois campos de período do WMS. Para execução automática:
-
-```json
-{ "dateMode": "today" }
+```sh
+docker compose -f compose.yaml -f compose.local.yaml up --build -d
+docker compose logs --tail 100 wms
 ```
 
-Para consultar uma data específica manualmente:
+O override local publica `127.0.0.1:3001`. `LOCAL_PORT` altera a porta externa. Para parar preservando os dados: `docker compose stop`. Não use `down -v` para atualizar a aplicação: isso remove o volume.
 
-```json
-{
-  "date": "2026-03-31",
-  "dateMode": "selected"
-}
-```
-Uma chamada antiga contendo apenas `date` passa a consultar o dia atual. Clientes que precisam consultar datas históricas devem enviar também `dateMode: "selected"`. O painel já envia esse modo ao usar a data escolhida.
-Aceita formatos de data manual: `yyyy-mm-dd` ou `dd/mm/yyyy`.
+No Coolify:
 
----
+1. Criar aplicação Docker Compose usando `compose.yaml` deste repositório.
+2. Informar `ADMIN_TOKEN` e `SETTINGS_KEY` nas variáveis privadas do recurso; não versionar `.env`.
+3. Associar domínio HTTPS à porta interna **3001** do serviço `wms`.
+4. Preservar o volume `wms-data:/data`, usar uma única réplica e evitar deploys com instâncias sobrepostas.
+5. Reservar inicialmente 3 GB de memória e `/dev/shm` de 1 GB; medir o consumo na VPS antes de ajustar.
+6. Após iniciar, configurar e homologar a operação no painel.
 
-## Integração com n8n
+SQLite usa WAL, transações e `synchronous=FULL`. O lock do volume impede duas aplicações no mesmo diretório. Ele não é eleição distribuída: use armazenamento local em um único host, sem SQLite em NFS. O healthcheck monitora o worker e o agendador; desconexão do WhatsApp aparece no painel e não derruba a importação.
 
-Workflow importável: [`n8n/wms-bot-workflow.json`](n8n/wms-bot-workflow.json).
+## Painel e fluxo
 
-O workflow dispara o bot **todos os dias às 6h**, e o próprio bot baixa o CSV do WMS **e** envia para o backend de conferência de carga (`POST /api/conference/upload`) internamente. O n8n apenas checa o resultado e notifica no WhatsApp via Evolution API.
+- **Visão geral:** saúde do processamento, WhatsApp, próxima consulta, horários perdidos, disco e auditoria.
+- **Execuções:** consultar hoje ou uma data histórica, acompanhar etapas, baixar CSV/screenshot e reenviar um arquivo específico à API.
+- **Configurações:** credenciais, destino, token Bearer opcional, fuso, timeouts e retenção.
+- **Agenda:** dias e vários horários, sem reiniciar o serviço.
+- **WhatsApp:** QR, destinatários, eventos de notificação, teste e conferência de resultados incertos.
 
-### Fluxo
+Cada execução guarda um snapshot criptografado da configuração. Alterações posteriores valem para novas execuções. Um reenvio à API cria outra execução e usa a configuração atual, preservando o arquivo e o histórico anteriores.
 
-```
-[1] Agendamento diário às 6h   (cron 0 6 * * *)
-        ↓
-[2] Config                      (Set — variáveis/placeholders)
-        ↓
-[3] Executar Bot (baixar e enviar CSV)  (POST {BOT_URL}/run, onError: continue, timeout 10 min)
-        ↓
-[4] Executou com sucesso?       (IF $json.success === true)
-   ├── sim → [5] Upload OK?      (IF $json.upload?.ok === true)
-   │            ├── sim → [6] Notificar Sucesso (✅ mapas · registros · erros)
-   │            └── não → [7] API não configurada?  (IF $json.upload == null)
-   │                         ├── sim → [8] Notificar Sem API (ℹ️ APP_API_URL não configurada)
-   │                         └── não → [9] Notificar Erro Upload (❌ upload.error/status)
-   └── não → [10] Notificar Erro Execução (❌ error do /run)
-```
+O filtro de data precisa ser preenchido e conferido em ambos os campos. Antes de exportar, o bot aguarda a transferência completa da consulta `GET /api/outbound-reports/api/PalletItem/get-all`, com `initialDate` e `finalDate` correspondentes ao período solicitado. Respostas de configuração, telemetria ou requisições iniciadas antes da consulta não liberam o download. Mudanças no contrato WMS podem exigir ajustar `automation/date-filter.cjs`; o bot falha explicitamente quando não consegue confirmar a consulta.
 
-O body do `POST /run` solicita a data **do próprio dia**, calculada pelo bot. Às 6h, o bot preenche o período no WMS com a data atual, mesmo que um workflow antigo ainda envie a data de ontem:
+O parser aceita CSV com BOM UTF-8, `;`, vírgula ou tabulação, aspas e campos multilinha. Exige `codigo_armazem`, `mapas`, `palete` e `codigo_item`, incluindo os nomes portugueses equivalentes. Chaves incompletas ou estrutura inválida bloqueiam o upload. Duplicatas usam essa combinação de campos; a última ocorrência prevalece. Cabeçalho válido sem registros resulta em `no_data` e não chama a API.
 
-```json
-{ "dateMode": "today" }
-```
+### Upload e recuperação
 
-### Nó `Config` (preencher após importar)
+Preserva o contrato `POST /api/conference/upload` com `{ records, file_name }`. O relatório inteiro é enviado, e a API de conferência faz seus próprios lotes. O timeout inicial é de 120 segundos. Redirecionamentos HTTP não são seguidos para evitar transferir o token para outro destino.
 
-| Variável | Exemplo | Observação |
-|---|---|---|
-| `BOT_URL` | `http://wms-bot:3001` | Se n8n e bot estiverem na mesma rede Coolify, use o nome do serviço/container; senão a URL pública `http://IP:3001` |
-| `EVOLUTION_BASE_URL` | `https://SEU-EVOLUTION.com.br` | URL da instância Evolution |
-| `EVOLUTION_APIKEY` | `SEU-APIKEY` | API Key da instância Evolution |
-| `EVOLUTION_NUMBER` | `5511999999999` | WhatsApp que recebe as notificações |
+HTTP 207 e listas `errors` são pendências, mesmo quando algum contador indica registros processados. Timeout, resposta não JSON, HTTP 500 sem confirmação e interrupção durante upload resultam em `uncertain`: pode haver dados gravados no destino. Não há retry automático de upload. Confira a aplicação destino antes de usar **Reenviar arquivo à API**.
 
-### Importação
+Estados de execução: `queued`, `downloading`, `validating`, `uploading`, `completed`, `partial`, `failed`, `uncertain`, `no_data` e `downloaded` (arquivo validado, API não configurada). A notificação tem estado independente: importação concluída não significa mensagem confirmada.
 
-1. No n8n: **Workflows → Import from File** → selecione `n8n/wms-bot-workflow.json`.
-2. Preencha o nó **Config** com os valores reais.
-3. Ative o workflow (o n8n roda o `POST /run` com a data do dia atual). O fuso do workflow deve ser `America/Maceio` para executar às 6h de Brasília.
+Após reinício, jobs já enfileirados continuam. Download/validação interrompidos viram falha; o operador pode criar nova consulta. Upload interrompido vira incerto. Horários perdidos são registrados, sem disparo retroativo. A primeira inicialização dentro do minuto de um horário também não dispara esse horário.
 
-Faça deploy da versão atualizada do bot no Coolify para aplicar a correção do filtro. Se o workflow já estiver importado no n8n, você também pode atualizar o campo **JSON Body** do nó **Executar Bot (baixar e enviar CSV)** com o JSON acima e salvar/publicar. Atualizar os arquivos locais não altera o workflow salvo no n8n.
+O padrão da agenda é todos os dias às 06:00, com fuso `America/Maceio`, inicialmente desativada. A data da consulta é fixada quando o job entra na fila. Há apenas um download por vez; o agendador e os envios continuam independentes.
 
-### Notificações WhatsApp (Evolution API)
+### WhatsApp
 
-| Caso | Mensagem |
+Habilite **WhatsApp**, salve e clique **Conectar / atualizar QR**. No telefone: Aparelhos conectados → Conectar aparelho. A sessão local é exclusiva deste projeto, não reutiliza a do Farol e não é apagada automaticamente quando desconecta.
+
+Em Docker Linux, a aplicação reserva o perfil antes de abrir o Chromium. Após recriação do contêiner, ela verifica os processos e remove somente os marcadores transitórios de uma instância encerrada (`SingletonLock`, `SingletonSocket`, `SingletonCookie` e `DevToolsActivePort`). Cookies e dados de pareamento são preservados. Se houver um navegador usando o perfil ou a verificação não puder ser concluída, a recuperação é bloqueada. Após encerramento forçado, a reserva pode levar cerca de 30 segundos para expirar; não apague a pasta da sessão para contornar esse estado.
+
+Cadastre um destinatário por linha: contatos com DDI+DDD+número e `@c.us`; grupos com seu ID exato e `@g.us`. Nomes de grupos não são identificadores. Para homologação, cadastre exclusivamente o destinatário de teste, ative envio e use **Enviar teste**. Essa ação envia uma mensagem real apenas após confirmação na tela.
+
+Mensagens planejadas permanecem pendentes se envio estiver desativado ou WhatsApp desconectado. Habilitar o envio permite processar essas pendências. Confira a fila antes de ativar. Destinatários removidos são ignorados nos itens ainda pendentes.
+
+`confirmed` indica ACK do servidor, não leitura. Falta de confirmação ou queda durante a tentativa resulta em `uncertain`, sem repetição automática. Outros itens desse destinatário aguardam a conferência. Depois de verificar no aparelho, escolha **Recebi**, **Não recebi: tentar** ou **Ignorar**, informando justificativa. A ação é auditada; mensagens já confirmadas não podem ser repetidas por esse controle. Uma pendência ainda não iniciada pode ser cancelada.
+
+WhatsApp Web pode mudar independentemente do pacote. A versão 1.34.7 tem um patch de compatibilidade de chaves, adaptado do Farol, aplicado no build e verificado antes de ficar `ready`. O patch exige a versão exata; atualizações devem revisar e testar pareamento/envio. Não foi incorporado envio de mídia.
+
+## API administrativa
+
+Use `Authorization: Bearer ADMIN_TOKEN`. Apenas `/health`, a página de entrada e seus arquivos estáticos são públicos. Dados, QR, artefatos e operações exigem autenticação.
+
+| Método / rota | Uso |
 |---|---|
-| ✅ Upload OK | `✅ WMS Bot — Detalhes da Separação importado.` + data, mapas, registros, erros, arquivo |
-| ❌ Erro no upload | `❌ WMS Bot — falha no upload para a API.` + erro/status |
-| ℹ️ Sem API | `ℹ️ WMS Bot — CSV baixado, mas APP_API_URL não configurada no bot.` |
-| ❌ Erro na execução | `❌ WMS Bot — falha na execução.` + erro do `/run` |
+| GET `/health` | Saúde mínima; HTTP 503 se worker/agendador não estiver saudável |
+| GET `/api/status` | Diagnóstico, próximos horários, slots e disco |
+| GET / PUT `/api/settings` | Consultar/alterar configuração; segredos nunca retornam integralmente |
+| GET `/api/jobs` | Últimas 100 execuções |
+| POST `/api/jobs` | `{ "requestKey":"chave-exclusiva", "date":"2026-10-19" }`; data opcional |
+| GET `/api/jobs/:id` | Estado, resultado, tentativas e mensagens |
+| GET `/api/jobs/:id/artifacts/csv` | Download autenticado do CSV |
+| GET `/api/jobs/:id/artifacts/screenshot` | Download autenticado da screenshot |
+| POST `/api/jobs/:id/retry-upload` | `{ "confirmed":true, "requestKey":"outra-chave" }` |
+| GET `/api/whatsapp/qr` | QR disponível e estado |
+| POST `/api/whatsapp/connect` | Inicializar/reconectar sem apagar a sessão |
+| POST `/api/whatsapp/test` | `{ "recipient":"DESTINATARIO_CADASTRADO", "confirmed":true, "requestKey":"teste-1" }` |
+| GET `/api/deliveries` | Últimas 200 notificações |
+| POST `/api/deliveries/:id/reconcile` | `{ "action":"confirm|retry|skip", "note":"justificativa", "confirmed":true }` |
+| GET `/api/audits` | Últimas 100 ações auditadas |
 
----
+POST de execução responde 202 ao criar, 200 para chave e parâmetros já existentes e 409 para reutilização conflitante. Novas execuções devem usar outra chave. O corpo JSON é limitado a 64 KB. Sem data explícita, usa hoje no fuso configurado; data futura ou inválida é rejeitada. Domingo=0 até sábado=6 na agenda.
 
-## Ajuste fino do seletor de download
+## Backup, retenção e restauração
 
-O bot prioriza controles com texto, título, rótulo ou ícone de download/exportação e usa os `content-button` sem identificação como última tentativa. Controles ocultos ou desabilitados são ignorados. O log mostra o rótulo de cada candidato e distingue falha no clique, ausência de download e erro ao salvar o arquivo.
+Conteúdo de `/data`: `wms.sqlite3` e WAL, `jobs/`, `wms-profile/`, `whatsapp/`, `whatsapp-cache/`, `logs/` e o lock do serviço. Credenciais e snapshots são criptografados com AES-256-GCM. CSVs, screenshots e sessões também contêm informações privadas: proteja o volume e seus backups.
 
-O prazo para iniciar o download é de **60 segundos por candidato**. Para relatórios demorados, configure no Coolify e faça novo deploy:
+Backup consistente apenas do banco, com a aplicação ativa:
 
-```env
-DOWNLOAD_TIMEOUT_MS=120000
+```sh
+docker compose exec wms node dist/backup.js /data/backup-wms.sqlite3
 ```
 
-Esse prazo aguarda o início do download; o salvamento aguarda a transferência terminar. Se nenhum candidato iniciar um download, consulte os logs e a screenshot em `/view-debug-last` para conferir o estado da tela e o seletor.
+Copie o backup para armazenamento externo privado. Para backup completo, pare o serviço e copie o volume inteiro. Preserve `SETTINGS_KEY` separadamente. Não copie apenas o arquivo SQLite bruto enquanto houver transações ativas.
 
+Para restaurar, mantenha a instância original parada, restaure o volume e use a mesma chave. Antes de iniciar, desative agenda e mensagens na base restaurada com o comando abaixo (a configuração salva tem prioridade sobre o ambiente):
 
-Se o botão de download do WMS não for encontrado automaticamente, inspecione o elemento no DevTools e ajuste os candidatos na função `clickDownload` em `download.js`.
-
-Exemplo de seletor customizado para incluir em `controls`:
-```javascript
-button[aria-label="Exportar CSV"], .export-btn
+```sh
+docker compose run --rm wms node dist/restore-safe.js
 ```
 
----
+Depois inicie uma única instância, confira histórico, pendências, destino e sessões e só então reative as opções pelo painel. Não execute a origem e sua cópia enviando simultaneamente.
 
-## Diferenças em relação ao BEES Bot
+A retenção padrão remove CSVs/screenshots após 30 dias, somente de execuções concluídas, sem dados, baixadas ou falhadas, e sem mensagens pendentes/incertas. Execuções com upload parcial/incerto são preservadas. Banco, auditoria e histórico não são apagados pela retenção. Logs da aplicação têm rotação de 5 MB × 5 arquivos mais o ativo; logs de automação também aparecem no stdout do contêiner. Acompanhe uso de disco no painel.
 
-| Característica      | BEES Bot              | WMS Bot                   |
-|---------------------|-----------------------|---------------------------|
-| Autenticação        | Azure AD MFA          | Usuário + Senha simples    |
-| Sessão MFA manual   | Sim (noVNC)           | Não necessário             |
-| Login automático    | Não                   | Sim (via env vars)         |
-| Porta               | 3000                  | 3001                       |
-| Site                | bees-platform.com     | wmst2.ambev.com.br         |
+## Migração do bot anterior
+
+1. Fazer backup dos volumes antigos e registrar as variáveis de integração.
+2. Subir esta versão em homologação com volume separado; agenda e mensagens desativadas.
+3. Configurar WMS e a API existente, homologar a consulta e conferir os dados importados.
+4. Parear WhatsApp e testar somente o destinatário autorizado.
+5. Desativar os workflows n8n antes de ativar a agenda nova. Remover dependências antigas somente após observar a operação.
+
+As rotas síncronas antigas (`/run`, `/upload-last`, `/delete-files` e downloads globais) retornam HTTP 410 depois da autenticação. Clientes externos devem migrar para `/api/jobs` e acompanhar o ID. A tela nova já usa esse fluxo. Os arquivos de `n8n/` são apenas referência de migração e não são utilizados pela aplicação.
+
+Para rollback, desative a agenda e mensagens novas, pare a nova aplicação e depois reative a versão/workflow anteriores com seus volumes originais. Não há mudança obrigatória no schema do banco de destino.
+
+## Validação e limites
+
+```sh
+npm test
+npm run test:ui
+docker compose --env-file .env.example config --no-interpolate --quiet
+```
+
+Para repetir a validação da imagem no PowerShell, com Docker ativo:
+
+```powershell
+docker build -t wms-bot:local-validation .
+.\scripts\validate-container.ps1
+```
+
+Esse teste usa contêiner e volume temporários exclusivos, sem rede externa, e verifica inicialização, Chromium, persistência após reinício, backup e preparação de restauração. Ao terminar, remove somente os recursos criados para o teste.
+
+Os testes usam exportações simuladas, banco temporário e servidores locais. O teste de navegador exige `npx playwright install chromium`, gera capturas em `test-results/` e não consulta WMS nem envia mensagens.
+
+Veja [docs/VALIDATION.md](docs/VALIDATION.md) para resultados, pendências e dependências. O deploy, login/exportação real, upload de produção e pareamento/entrega reais precisam ser homologados com os acessos da operação.

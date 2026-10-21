@@ -1,0 +1,31 @@
+name: wms-bot
+services:
+  wms:
+    build: .
+    restart: unless-stopped
+    init: false
+    environment:
+      DATA_DIR: /data
+      PORT: "3001"
+      ADMIN_TOKEN: "${ADMIN_TOKEN:?Configure ADMIN_TOKEN}"
+      SETTINGS_KEY: "${SETTINGS_KEY:?Configure SETTINGS_KEY}"
+      WMS_USER: "${WMS_USER:-}"
+      WMS_PASS: "${WMS_PASS:-}"
+      WMS_URL: "${WMS_URL:-https://wmst2.ambev.com.br/wmsnew}"
+      APP_API_URL: "${APP_API_URL:-}"
+      APP_API_ENDPOINT: "${APP_API_ENDPOINT:-/api/conference/upload}"
+      APP_API_TOKEN: "${APP_API_TOKEN:-}"
+      APP_TIMEZONE: "${APP_TIMEZONE:-America/Maceio}"
+    volumes:
+      - wms-data:/data
+    expose:
+      - "3001"
+    shm_size: 1gb
+    stop_grace_period: 40s
+    deploy:
+      replicas: 1
+      resources:
+        limits:
+          memory: 3G
+volumes:
+  wms-data:
