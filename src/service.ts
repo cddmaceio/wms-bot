@@ -37,6 +37,7 @@ export class Service {
   readonly scheduler: Scheduler;
   lastTick = Date.now();
   workerError: string | null = null;
+  deliveryWorkerError: string | null = null;
   constructor(
     readonly store: Store,
     readonly settings: SettingsService,
@@ -89,7 +90,7 @@ export class Service {
     return {
       ...this.publicJob(job),
       attempts: this.store.attempts(id),
-      deliveries: this.store.deliveries(id),
+      deliveries: this.deliveries(id),
     };
   }
   publicJob(job: Job) {
@@ -383,11 +384,28 @@ export class Service {
     this.notify(result);
     this.log("job_finished", { id: job.id, state: result.state });
   }
+  deliveries(jobId?: string) {
+    const settings = this.settings.get();
+    return this.store.deliveries(jobId).map(item => {
+      if (item.state !== 'pending') return item;
+      const blocker = this.store.db.prepare(
+        "SELECT id,state FROM deliveries WHERE recipient=? AND state IN ('uncertain','sending','blocked') AND id<>? ORDER BY id LIMIT 1"
+      ).get(item.recipient, item.id) as { id: number; state: string } | undefined;
+      const waitingReason = !settings.whatsappEnabled ? 'WhatsApp desativado'
+        : !settings.sendEnabled ? 'Envio desativado'
+        : blocker ? 'Aguardando conferência da mensagem #' + blocker.id + ' (' + blocker.state + ')'
+        : item.attempts > 0 ? 'Aguardando nova tentativa (intervalo mínimo de 30 segundos)'
+        : 'Aguardando processamento e conexão WhatsApp';
+      return { ...item, waitingReason, blockedBy: blocker?.id ?? null };
+    });
+  }
   private async deliver() {
     const s = this.settings.get();
     if (!s.whatsappEnabled || !s.sendEnabled) return;
     if (!(await this.bridge.status()).ready) return;
+    const deferred = new Set<string>();
     for (const item of this.store.pending()) {
+      if (deferred.has(item.recipient)) continue;
       if (this.stopping) return;
       const current = this.settings.get();
       if (!current.sendEnabled || !current.whatsappEnabled) return;
@@ -406,12 +424,18 @@ export class Service {
           "SELECT id FROM deliveries WHERE recipient=? AND state IN ('uncertain','sending','blocked') AND id<>? LIMIT 1",
         )
         .get(item.recipient, item.id);
-      if (blocked || !this.store.claimDelivery(item.id)) continue;
+      if (blocked) continue;
+      if (item.attempts > 0 && Date.now() - Date.parse(item.updated) < 30000) {
+        deferred.add(item.recipient);
+        continue;
+      }
+      if (!this.store.claimDelivery(item.id)) continue;
+      this.store.audit('delivery_started', { id: item.id, job: item.jobId, attempt: item.attempts + 1 });
       try {
         const response = await this.bridge.send(item.recipient, item.text);
         const state =
           response.state === "not_sent"
-            ? "pending"
+            ? item.attempts + 1 >= 3 ? "blocked" : "pending"
             : ["confirmed", "uncertain", "blocked"].includes(response.state)
               ? response.state
               : "uncertain";
@@ -421,8 +445,10 @@ export class Service {
           response.messageId || null,
           response.note || null,
         );
-        if (state === "pending") break;
+        this.store.audit('delivery_result', { id: item.id, state, attempt: item.attempts + 1, note: response.note || null });
+        if (state === 'pending') deferred.add(item.recipient);
       } catch {
+        this.store.audit('delivery_result', { id: item.id, state: 'uncertain', note: 'Processo WhatsApp sem resposta' });
         this.store.updateDelivery(
           item.id,
           "uncertain",
@@ -460,10 +486,16 @@ export class Service {
   }
   async status() {
     return {
-      workerHealthy: !this.workerError,
+      workerHealthy: this.healthy(),
       lastTick: new Date(this.lastTick).toISOString(),
       workerError: this.workerError,
       whatsapp: await this.bridge.status(),
+      notifications: {
+        enabled: this.settings.get().sendEnabled,
+        workerError: this.deliveryWorkerError,
+        counts: this.store.db.prepare('SELECT state,COUNT(*) AS total FROM deliveries GROUP BY state').all(),
+        waiting: this.deliveries().filter(item => item.state === 'pending').map(item => ({ id: item.id, waitingReason: 'waitingReason' in item ? item.waitingReason : null, blockedBy: 'blockedBy' in item ? item.blockedBy : null })),
+      },
       nextRuns: nextSlots(this.settings.get()),
       slots: this.store.slots(),
       disk: fs.statfsSync(this.data),
@@ -494,9 +526,11 @@ export class Service {
       }
       if (!this.sending)
         this.sending = this.deliver()
-          .catch((error) =>
-            this.log("delivery_worker_error", { error: redact(error) }),
-          )
+          .then(() => { this.deliveryWorkerError = null; })
+          .catch((error) => {
+            this.deliveryWorkerError = redact(error);
+            this.log("delivery_worker_error", { error: this.deliveryWorkerError });
+          })
           .finally(() => {
             this.sending = undefined;
           });

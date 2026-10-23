@@ -447,6 +447,7 @@ async function renderDetail() {
   for (const item of job.deliveries) {
     const p = el("p", item.recipient + " · ");
     p.append(badge(item.state));
+    if (item.waitingReason) p.append(el("small", item.waitingReason));
     if (item.note) p.append(el("small", item.note));
     content.append(p);
   }
@@ -460,6 +461,7 @@ function renderDeliveries(items) {
     row.append(event);
     const state = el("td");
     state.append(badge(item.state));
+    if (item.waitingReason) state.append(el("small", item.waitingReason));
     if (item.note) state.append(el("small", item.note));
     row.append(state);
     const controls = el("td");
@@ -566,6 +568,7 @@ async function refresh() {
         workerHealthy: status.workerHealthy,
         lastTick: status.lastTick,
         whatsapp: status.whatsapp,
+        notifications: status.notifications,
       },
       null,
       2,

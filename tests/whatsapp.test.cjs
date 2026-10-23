@@ -64,3 +64,28 @@ test("Patch de chaves suporta $1, preserva _serialized e exige versão conhecida
   );
   assert.throws(() => patchSource(patched, "1.35.0"), /Revisar/);
 });
+
+
+test('Resolucao alternativa valida PN/LID antes de enviar', async () => {
+  const client = new EventEmitter();
+  client.getNumberId = async () => { throw new Error('queryWidExists indisponivel'); };
+  client.getContactLidAndPhone = async ids => {
+    assert.deepEqual(ids, ['5582999999999@c.us']);
+    return [{ pn: ids[0], lid: '123456789@lid' }];
+  };
+  client.sendMessage = async id => {
+    assert.equal(id, '123456789@lid');
+    return { id: { _serialized: 'fallback' }, ack: 1 };
+  };
+  assert.equal((await sendText(client, '5582999999999@c.us', 'teste', 100)).state, 'confirmed');
+});
+
+test('Resolucao alternativa rejeita outro telefone e preserva erro original', async () => {
+  const client = new EventEmitter();
+  client.getNumberId = async () => { throw new Error('queryWidExists indisponivel'); };
+  client.getContactLidAndPhone = async () => [{ pn: '5582888888888@c.us', lid: '123456789@lid' }];
+  client.sendMessage = () => assert.fail('Nao deve enviar');
+  const result = await sendText(client, '5582999999999@c.us', 'teste', 100);
+  assert.equal(result.state, 'not_sent');
+  assert.match(result.note, /queryWidExists indisponivel/);
+});

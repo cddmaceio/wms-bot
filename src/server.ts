@@ -63,7 +63,7 @@ class Controller {
       });
   };
   deliveries = (_req: Request, res: Response) =>
-    res.json(this.service.store.deliveries());
+    res.json(this.service.deliveries());
   reconcile = (req: Request, res: Response) => {
     const input = object(req);
     const id = Number(req.params.id);

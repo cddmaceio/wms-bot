@@ -228,3 +228,39 @@ test("Backup consistente pode ser restaurado com configurações e jobs", async 
   assert(vault.open(copy.setting()).timezone);
   copy.close();
 });
+
+
+test('Falha antes do envio tem intervalo, limite, auditoria e nao paralisa outro destinatario', async t => {
+  const recipient = '5582999999999@c.us', other = '5582888888888@c.us';
+  const calls = [];
+  const {service, store} = setup(t, {whatsappEnabled:true, sendEnabled:true, recipients:[recipient,other]}, {
+    bridge: { status:async()=>({ready:true}), send:async id => {
+      calls.push(id);
+      return id === recipient ? {state:'not_sent',note:'Falha na resolucao'} : {state:'confirmed',messageId:'ok'};
+    }}
+  });
+  const first = service.testMessage(recipient,true,'retry-limit');
+  const waiting = service.testMessage(recipient,true,'waiting');
+  const second = service.testMessage(other,true,'other');
+  const item = store.deliveries(first)[0];
+  await drain(service);
+  assert.equal(store.delivery(item.id).attempts,1);
+  assert.equal(store.deliveries(second)[0].state,'confirmed');
+  assert.equal(store.deliveries(waiting)[0].attempts,0);
+  await drain(service);
+  assert.equal(store.delivery(item.id).attempts,1);
+  // Envelhecer apenas a tentativa testada, sem aguardar tempo real.
+  for(let i=0;i<2;i++) {
+    store.db.prepare('UPDATE deliveries SET updated=? WHERE id=?').run('2020-01-01T00:00:00.000Z',item.id);
+    await drain(service);
+  }
+  assert.equal(store.delivery(item.id).state,'blocked');
+  assert.equal(store.delivery(item.id).attempts,3);
+  const detail = service.detail(waiting).deliveries[0];
+  assert.equal(detail.blockedBy,item.id);
+  assert.match(detail.waitingReason,new RegExp('#'+item.id));
+  assert(store.audits().some(a=>a.action==='delivery_result'));
+  assert.equal((await service.status()).notifications.counts.find(x=>x.state==='blocked').total,1);
+  await drain(service);
+  assert.equal(calls.filter(id=>id===recipient).length,3);
+});
