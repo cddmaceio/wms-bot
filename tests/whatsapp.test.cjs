@@ -10,7 +10,7 @@ test("WhatsApp captura ACK antes do retorno da mensagem e limpa listener", async
   const client = new EventEmitter();
   client.getNumberId = async () => ({ _serialized: "123@lid" });
   client.sendMessage = async (id) => {
-    assert.equal(id, "123@lid");
+    assert.equal(id, "5582999999999@c.us");
     client.emit("message_ack", { id: { _serialized: "m1" } }, 1);
     return { id: { _serialized: "m1" }, ack: 0 };
   };
@@ -30,15 +30,16 @@ test("WhatsApp não repete automaticamente envio sem confirmação", async () =>
   assert.equal(calls, 1);
   assert.equal(client.listenerCount("message_ack"), 0);
 });
-test("Destinatário sem cadastro não inicia sendMessage", async () => {
+test("Envio sem identificador permanece incerto e não repete", async () => {
   const client = new EventEmitter();
-  client.getNumberId = async () => null;
-  client.sendMessage = () => assert.fail("Não deveria enviar");
-  assert.equal(
-    (await sendText(client, "5582999999999@c.us", "teste")).state,
-    "blocked",
-  );
+  let calls = 0;
+  client.sendMessage = async () => { calls++; return null; };
+  const result = await sendText(client, "5582999999999@c.us", "teste", 100);
+  assert.equal(result.state, "uncertain");
+  assert.equal(calls, 1);
+  assert.equal(client.listenerCount("message_ack"), 0);
 });
+
 test("Patch de chaves suporta $1, preserva _serialized e exige versão conhecida", () => {
   const file = path.join(
     path.dirname(require.resolve("whatsapp-web.js/package.json")),
@@ -66,26 +67,38 @@ test("Patch de chaves suporta $1, preserva _serialized e exige versão conhecida
 });
 
 
-test('Resolucao alternativa valida PN/LID antes de enviar', async () => {
+test('Consulta de numero travada nao impede o envio nativo ao ID cadastrado', async () => {
   const client = new EventEmitter();
-  client.getNumberId = async () => { throw new Error('queryWidExists indisponivel'); };
-  client.getContactLidAndPhone = async ids => {
-    assert.deepEqual(ids, ['5582999999999@c.us']);
-    return [{ pn: ids[0], lid: '123456789@lid' }];
+  client.getNumberId = () => assert.fail('Nao deve consultar queryWidExists');
+  client.getContactLidAndPhone = () => assert.fail('Nao deve repetir a consulta por PN/LID');
+  let calls = 0;
+  client.sendMessage = async (id, text, options) => {
+    calls++;
+    assert.equal(id, '5582999999999@c.us');
+    assert.equal(text, 'teste');
+    assert.equal(options.sendSeen, false);
+    return { id: { _serialized: 'native' }, ack: 1 };
   };
-  client.sendMessage = async id => {
-    assert.equal(id, '123456789@lid');
-    return { id: { _serialized: 'fallback' }, ack: 1 };
-  };
-  assert.equal((await sendText(client, '5582999999999@c.us', 'teste', 100)).state, 'confirmed');
+  const result = await sendText(client, '5582999999999@c.us', 'teste', 100);
+  assert.equal(result.state, 'confirmed');
+  assert.equal(result.messageId, 'native');
+  assert.equal(calls, 1);
 });
 
-test('Resolucao alternativa rejeita outro telefone e preserva erro original', async () => {
+test('Erro no envio nativo fica incerto com diagnostico e sem segundo envio', async () => {
   const client = new EventEmitter();
-  client.getNumberId = async () => { throw new Error('queryWidExists indisponivel'); };
-  client.getContactLidAndPhone = async () => [{ pn: '5582888888888@c.us', lid: '123456789@lid' }];
-  client.sendMessage = () => assert.fail('Nao deve enviar');
+  let calls = 0;
+  client.sendMessage = async () => { calls++; throw new Error('Falha interna 5582999999999'); };
   const result = await sendText(client, '5582999999999@c.us', 'teste', 100);
-  assert.equal(result.state, 'not_sent');
-  assert.match(result.note, /queryWidExists indisponivel/);
+  assert.equal(result.state, 'uncertain');
+  assert.match(result.note, /Falha interna/);
+  assert(!result.note.includes('5582999999999'));
+  assert.equal(calls, 1);
+  assert.equal(client.listenerCount('message_ack'), 0);
+});
+
+test('ID invalido continua bloqueado antes de qualquer envio', async () => {
+  const client = new EventEmitter();
+  client.sendMessage = () => assert.fail('Nao deve enviar');
+  await assert.rejects(sendText(client, 'outro-destino', 'teste', 100), /inválido/);
 });

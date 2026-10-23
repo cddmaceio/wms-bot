@@ -23,3 +23,11 @@ O motivo interno da falha de resolução ainda precisa ser confirmado na instân
 Publicar a alteração e fazer redeploy de uma única instância na Coolify, preservando o volume existente. Uma mensagem que estiver sending durante o reinício será recuperada como uncertain. Conferir o aparelho e revisar a mensagem #4 no painel antes de liberar a fila. Não marcar como recebida sem confirmação. Não apagar banco nem sessão para liberar a fila.
 
 A correção foi preparada localmente; não foi realizado deploy nem envio manual durante o diagnóstico. A alternativa de resolução precisa ser homologada na sessão real após implantação.
+
+## Diagnóstico após o primeiro deploy
+
+Às 23:42:18 UTC, a mensagem #4 ficou blocked com erro de timeout na resolução. A alternativa PN/LID não resolveu: quando não há vínculo em cache, a implementação da biblioteca também chama queryWidExists.
+
+A correção seguinte remove as duas consultas prévias. O envio usa sendMessage com o ID exato cadastrado, deixando a resolução da conversa com o fluxo nativo da biblioteca. Há uma única chamada de envio, acompanhada por ACK. Falha ou timeout depois de iniciar essa chamada continua uncertain, sem retry automático. O erro original de envio passa a constar na nota, com números longos e Bearer removidos.
+
+Após este segundo deploy, a mensagem #4 já bloqueada precisa ser revisada no painel: após conferir que não chegou, usar **Não recebi: tentar** e justificar. O deploy não altera sozinho a decisão de revisão de uma mensagem bloqueada. A homologação real permanece necessária.

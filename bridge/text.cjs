@@ -7,41 +7,9 @@ async function sendText(client, recipient, text, timeout = 45000) {
     text.length > 4000
   )
     throw new Error("Mensagem ou destinatário inválido");
-  let chatId = recipient;
-  const bounded = async (work, milliseconds) => {
-    let timer;
-    try {
-      return await Promise.race([work(), new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error('Tempo de resolução excedido')), milliseconds);
-      })]);
-    } finally { clearTimeout(timer); }
-  };
-  // Falha de resolução acontece antes de sendMessage: nenhum envio foi iniciado.
-  try {
-    if (recipient.endsWith("@c.us")) {
-      let registered;
-      try {
-        registered = await bounded(() => client.getNumberId(recipient), 10000);
-      } catch (primaryError) {
-        // O vínculo PN/LID só é aceito quando o telefone retornado é o solicitado.
-        try {
-          const contacts = await bounded(() => client.getContactLidAndPhone([recipient]), 5000);
-          const contact = contacts.find(item => item.pn === recipient && /^\d+@lid$/.test(item.lid));
-          if (!contact) throw primaryError;
-          registered = { _serialized: contact.lid };
-        } catch { throw primaryError; }
-      }
-      if (!registered?._serialized)
-        return { state: "blocked", note: "Número não encontrado no WhatsApp" };
-      chatId = registered._serialized;
-    }
-  } catch (error) {
-    const reason = String(error?.message || error).replace(/\d{8,}/g, '[numero]').replace(/Bearer\s+\S+/gi, 'Bearer [segredo]').slice(0, 300);
-    return {
-      state: "not_sent",
-      note: "Não foi possível resolver o destinatário antes do envio: " + reason,
-    };
-  }
+  // sendMessage aceita o ID cadastrado e resolve a conversa internamente.
+  // getNumberId e getContactLidAndPhone podem depender da mesma consulta remota
+  // que expira, mesmo com uma conversa existente e a sessão pronta.
   // Escuta os ACKs antes de sendMessage, inclusive se chegarem antes do retorno.
   const acks = new Map();
   let currentId, finish;
@@ -62,7 +30,7 @@ async function sendText(client, recipient, text, timeout = 45000) {
       );
     });
     const work = (async () => {
-      const message = await client.sendMessage(chatId, text, {
+      const message = await client.sendMessage(recipient, text, {
         sendSeen: false,
       });
       currentId = message?.id?._serialized;
@@ -88,11 +56,15 @@ async function sendText(client, recipient, text, timeout = 45000) {
       };
     })();
     return await Promise.race([work, deadline]);
-  } catch {
+  } catch (error) {
+    const reason = String(error?.message || error)
+      .replace(/\d{8,}/g, '[numero]')
+      .replace(/Bearer\s+\S+/gi, 'Bearer [segredo]')
+      .slice(0, 300);
     return {
       state: "uncertain",
       messageId: currentId,
-      note: "Envio iniciado sem confirmação; conferir no aparelho",
+      note: "Envio iniciado sem confirmação; conferir no aparelho: " + reason,
     };
   } finally {
     clearTimeout(timer);
