@@ -31,3 +31,15 @@ A correção foi preparada localmente; não foi realizado deploy nem envio manua
 A correção seguinte remove as duas consultas prévias. O envio usa sendMessage com o ID exato cadastrado, deixando a resolução da conversa com o fluxo nativo da biblioteca. Há uma única chamada de envio, acompanhada por ACK. Falha ou timeout depois de iniciar essa chamada continua uncertain, sem retry automático. O erro original de envio passa a constar na nota, com números longos e Bearer removidos.
 
 Após este segundo deploy, a mensagem #4 já bloqueada precisa ser revisada no painel: após conferir que não chegou, usar **Não recebi: tentar** e justificar. O deploy não altera sozinho a decisão de revisão de uma mensagem bloqueada. A homologação real permanece necessária.
+
+## Contexto do navegador sem módulos
+
+O diagnóstico executado no Chromium da instância retornou WWebJS.sendMessage ausente, sem WAWebSocketModel.Socket nem WAWebCollections.Chat, apesar do estado ready no worker. A reconexão autorizada desativou e reativou somente o WhatsApp, preservando perfil e pareamento. A mensagem #4 permaneceu incerta; nenhuma reconciliação nem envio manual foi executado.
+
+O worker passa a verificar o contexto principal ativo, módulos, compatibilidade e Socket.state antes de declarar ready e antes de enviar. A verificação tem limite de 1,5 segundo. Perda dos módulos resulta em session_unavailable, visível no painel. O botão de conectar passa a recriar uma sessão ready preservando o perfil, sem sobrepor inicializações ou interromper uma tentativa de envio em curso. Uma reconexão não repete mensagens incertas.
+
+## Causa da rota No LID for user
+
+Após recuperar a sessão, o diagnóstico de cache mostrou que o destinatário cadastrado não tem LID nem conversa no formato com nono dígito. A conversa já confirmada existe, e seu vínculo reverso aponta para o telefone canônico sem esse dígito. O envio direto ao cadastro original provoca No LID for user.
+
+A resolução agora consulta getNumberId para obter o número canônico registrado e, depois, getContactLidAndPhone para esse número canônico. Somente um vínculo com PN exatamente igual ao canônico é aceito. O envio é feito uma única vez ao LID retornado. Nenhum dígito é adicionado/removido por heurística, e o destinatário cadastrado e seu histórico são preservados. A resolução inteira tem limite de 12 segundos e ocorre antes de iniciar sendMessage. A sessão é verificada antes desse fluxo.

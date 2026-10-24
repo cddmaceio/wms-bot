@@ -1,3 +1,4 @@
+const { resolveRecipient } = require("./recipient.cjs");
 const recipientPattern = /^(?:\d{10,15}@c\.us|\d{10,25}(?:-\d+)?@g\.us)$/;
 async function sendText(client, recipient, text, timeout = 45000) {
   if (
@@ -7,9 +8,8 @@ async function sendText(client, recipient, text, timeout = 45000) {
     text.length > 4000
   )
     throw new Error("Mensagem ou destinatário inválido");
-  // sendMessage aceita o ID cadastrado e resolve a conversa internamente.
-  // getNumberId e getContactLidAndPhone podem depender da mesma consulta remota
-  // que expira, mesmo com uma conversa existente e a sessão pronta.
+  const route = await resolveRecipient(client, recipient);
+  if (route.state !== 'resolved') return route;
   // Escuta os ACKs antes de sendMessage, inclusive se chegarem antes do retorno.
   const acks = new Map();
   let currentId, finish;
@@ -30,7 +30,7 @@ async function sendText(client, recipient, text, timeout = 45000) {
       );
     });
     const work = (async () => {
-      const message = await client.sendMessage(recipient, text, {
+      const message = await client.sendMessage(route.chatId, text, {
         sendSeen: false,
       });
       currentId = message?.id?._serialized;

@@ -24,6 +24,7 @@ const names = {
   ready: "Conectado",
   disabled: "Desativado",
   unavailable: "Indisponível",
+  session_unavailable: "Sessão indisponível: reconecte",
   qr: "Aguardando QR",
   initializing: "Conectando",
   authenticated: "Autenticado",

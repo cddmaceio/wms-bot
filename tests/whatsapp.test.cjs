@@ -10,7 +10,7 @@ test("WhatsApp captura ACK antes do retorno da mensagem e limpa listener", async
   const client = new EventEmitter();
   client.getNumberId = async () => ({ _serialized: "123@lid" });
   client.sendMessage = async (id) => {
-    assert.equal(id, "5582999999999@c.us");
+    assert.equal(id, "123@lid");
     client.emit("message_ack", { id: { _serialized: "m1" } }, 1);
     return { id: { _serialized: "m1" }, ack: 0 };
   };
@@ -20,6 +20,7 @@ test("WhatsApp captura ACK antes do retorno da mensagem e limpa listener", async
 });
 test("WhatsApp não repete automaticamente envio sem confirmação", async () => {
   const client = new EventEmitter();
+  client.getNumberId = async () => ({ _serialized: "123@lid" });
   let calls = 0;
   client.sendMessage = async () => {
     calls++;
@@ -32,6 +33,7 @@ test("WhatsApp não repete automaticamente envio sem confirmação", async () =>
 });
 test("Envio sem identificador permanece incerto e não repete", async () => {
   const client = new EventEmitter();
+  client.getNumberId = async () => ({ _serialized: "123@lid" });
   let calls = 0;
   client.sendMessage = async () => { calls++; return null; };
   const result = await sendText(client, "5582999999999@c.us", "teste", 100);
@@ -67,26 +69,31 @@ test("Patch de chaves suporta $1, preserva _serialized e exige versão conhecida
 });
 
 
-test('Consulta de numero travada nao impede o envio nativo ao ID cadastrado', async () => {
+test('Numero com nono digito usa canonico informado pelo WhatsApp e envia ao LID', async () => {
   const client = new EventEmitter();
-  client.getNumberId = () => assert.fail('Nao deve consultar queryWidExists');
-  client.getContactLidAndPhone = () => assert.fail('Nao deve repetir a consulta por PN/LID');
-  let calls = 0;
-  client.sendMessage = async (id, text, options) => {
-    calls++;
-    assert.equal(id, '5582999999999@c.us');
-    assert.equal(text, 'teste');
-    assert.equal(options.sendSeen, false);
-    return { id: { _serialized: 'native' }, ack: 1 };
+  client.getNumberId = async () => ({ _serialized: "123@lid" });
+  let sends=0;
+  client.getNumberId = async id => {
+    assert.equal(id,'5582999999999@c.us');
+    return {_serialized:'558299999999@c.us'};
   };
-  const result = await sendText(client, '5582999999999@c.us', 'teste', 100);
-  assert.equal(result.state, 'confirmed');
-  assert.equal(result.messageId, 'native');
-  assert.equal(calls, 1);
+  client.getContactLidAndPhone = async ids => {
+    assert.deepEqual(ids,['558299999999@c.us']);
+    return [{pn:ids[0],lid:'123456789012345@lid'}];
+  };
+  client.sendMessage = async id => {
+    sends++;
+    assert.equal(id,'123456789012345@lid');
+    return {id:{_serialized:'canonical'},ack:1};
+  };
+  const result=await sendText(client,'5582999999999@c.us','teste',100);
+  assert.equal(result.state,'confirmed');
+  assert.equal(sends,1);
 });
 
 test('Erro no envio nativo fica incerto com diagnostico e sem segundo envio', async () => {
   const client = new EventEmitter();
+  client.getNumberId = async () => ({ _serialized: "123@lid" });
   let calls = 0;
   client.sendMessage = async () => { calls++; throw new Error('Falha interna 5582999999999'); };
   const result = await sendText(client, '5582999999999@c.us', 'teste', 100);
@@ -99,6 +106,7 @@ test('Erro no envio nativo fica incerto com diagnostico e sem segundo envio', as
 
 test('ID invalido continua bloqueado antes de qualquer envio', async () => {
   const client = new EventEmitter();
+  client.getNumberId = async () => ({ _serialized: "123@lid" });
   client.sendMessage = () => assert.fail('Nao deve enviar');
   await assert.rejects(sendText(client, 'outro-destino', 'teste', 100), /inválido/);
 });

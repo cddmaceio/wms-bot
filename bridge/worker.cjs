@@ -4,6 +4,7 @@ const QRCode = require("qrcode");
 const { chromium } = require("playwright");
 const path = require("node:path");
 const { sendText } = require("./text.cjs");
+const { inspectSession } = require("./health.cjs");
 const { acquireProfileLease, profileInUse } = require('./profile.cjs');
 let client,
   qr,
@@ -22,19 +23,22 @@ function fail(next, error) {
     .slice(0, 500);
   process.send?.({ event: next });
 }
-async function connect() {
+async function connect(force = false) {
   if (
     !enabled || shuttingDown ||
     connecting ||
-    ["ready", "initializing", "authenticated", "qr"].includes(state)
+    ["initializing", "authenticated", "qr"].includes(state) ||
+    (!force && state === "ready")
   )
     return;
+  if (sending) throw new Error("Aguarde a tentativa de envio terminar antes de reconectar");
   connecting = true;
   state = "initializing";
   lastError = null;
   qr = null;
   const previous = client;
   client = null;
+  healthCheck = undefined;
   try {
     if (previous) await previous.destroy().catch(() => {});
     if (!profileLease) profileLease = await acquireProfileLease(data);
@@ -82,15 +86,8 @@ async function connect() {
     active.on("ready", async () => {
       if (client !== active) return;
       try {
-        const verified = await active.pupPage.evaluate(
-          () =>
-            typeof window.WWebJS.getMsgKeyId === "function" &&
-            window.WWebJS.sendMessage
-              .toString()
-              .includes("getMsgKeyId(newMsgKey)"),
-        );
-        if (!verified)
-          throw new Error("Compatibilidade de chaves não confirmada");
+        const health = await inspectSession(active);
+        if (!health.ready) throw new Error(health.reason);
         if (client === active && enabled) {
           state = "ready";
           qr = null;
@@ -130,9 +127,29 @@ async function connect() {
     connecting = false;
   }
 }
+let healthCheck;
+async function status() {
+  const active = client;
+  let health = null;
+  if (enabled && active && ['ready', 'session_unavailable'].includes(state)) {
+    if (!healthCheck) {
+      const check = inspectSession(active).then(result => {
+        if (client === active && enabled && ['ready', 'session_unavailable'].includes(state)) {
+          if (!result.ready && state === 'ready') fail('session_unavailable', result.reason);
+          else if (result.ready && state === 'session_unavailable') {
+            state = 'ready'; lastError = null;
+          }
+        }
+        return result;
+      }).finally(() => { if (healthCheck === check) healthCheck = undefined; });
+      healthCheck = check;
+    }
+    health = await healthCheck;
+  }
+  return { state, ready: state === 'ready' && health?.ready === true, lastError, health };
+}
 async function handle(action, payload) {
-  if (action === "status")
-    return { state, ready: state === "ready", lastError };
+  if (action === "status") return status();
   if (action === "qr") return { state, image: state === "qr" ? qr : null };
   if (action === "configure") {
     enabled = payload.enabled === true;
@@ -146,17 +163,19 @@ async function handle(action, payload) {
     return {};
   }
   if (action === "connect") {
-    await connect();
+    await connect(true);
     return {};
   }
   if (action === "send") {
-    if (!enabled || state !== "ready" || sending)
+    if (!enabled || sending || state !== "ready")
       return {
         state: "not_sent",
         note: "WhatsApp indisponível antes da tentativa",
       };
     sending = true;
     try {
+      if (!(await status()).ready)
+        return { state: 'not_sent', note: 'Sessão WhatsApp indisponível antes do envio' };
       return await sendText(client, payload.recipient, payload.text);
     } finally {
       sending = false;
